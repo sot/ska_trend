@@ -1,6 +1,11 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Update wrong-box acquisition plot.
+
+This module provides functions to update and generate a wrong-box acquisition plot and table of recent
+anomalies.
+
 """
+
 
 import argparse
 import functools
@@ -56,6 +61,20 @@ def get_opt():
 
 
 def make_web_page(opt, anom_table):
+    """
+    Generate a web page report.
+
+    Parameters
+    ----------
+    opt : argparse.Namespace
+        The command-line arguments.
+    anom_table : astropy.table.Table
+        The table of anomaly data.
+
+    Returns
+    -------
+    None
+    """
     # Setup for the web report template rendering
     tr_classes = []
     for anom in anom_table:
@@ -81,6 +100,16 @@ def make_web_page(opt, anom_table):
 
 
 def make_plot(opt, anoms):
+    """
+    Generate a plot of wrong-box acquisition anomalies.
+
+    Parameters
+    ----------
+    opt : argparse.Namespace
+        The command-line arguments.
+    anoms : astropy.table.Table
+        The table of anomaly data.
+    """
     frac_year = CxoTime(anoms["guide_tstart"]).frac_year
 
     bin_width = 0.5
@@ -120,6 +149,19 @@ def make_plot(opt, anoms):
 
 
 def wrong_box(acqs):
+    """
+    Check if an acquisition is a wrong-box acquisition.
+
+    Parameters
+    ----------
+    acqs : astropy.table.Table
+        The table of acquisition data.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array indicating if each acquisition is a wrong-box acquisition.
+    """
     anom_match = (acqs["img_func"] != "NONE") & (
         (np.abs(acqs["dy"]) >= (acqs["halfw"] + BOX_PAD))
         | (np.abs(acqs["dz"]) >= (acqs["halfw"] + BOX_PAD))
@@ -128,6 +170,19 @@ def wrong_box(acqs):
 
 
 def get_anom_acq_obs(start="2010:001"):
+    """
+    Get acquisition observations with wrong-box anomalies.
+
+    Parameters
+    ----------
+    start : str, optional
+        The start time for selecting observations. Defaults to "2010:001".
+
+    Returns
+    -------
+    astropy.table.Table
+        The table of acquisition observations with wrong-box anomalies.
+    """
     acqs = mica.stats.acq_stats.get_stats()
     acqs = acqs[acqs["guide_tstart"] > CxoTime(start).secs]
     anom_match = wrong_box(acqs)
@@ -137,6 +192,32 @@ def get_anom_acq_obs(start="2010:001"):
 
 
 def get_anom_info(anom_row, acqs):
+    """
+    Get information about a wrong-box anomaly.
+
+    Parameters
+    ----------
+    anom_row : astropy.table.Row
+        The row of anomaly data.
+    acqs : astropy.table.Table
+        The table of acquisition data.
+
+    Returns
+    -------
+    dict
+        Dictionary containing information about the wrong-box anomaly.
+
+    Raises
+    ------
+    None
+
+    Examples
+    --------
+    >>> anom_row = astropy.table.Row(...)
+    >>> acqs = astropy.table.Table(...)
+    >>> get_anom_info(anom_row, acqs)
+    {'classic': False, 'actual_slot': -1, 'actual_slot_idd': False, 'actual_slot_mag_obs': -1, 'another_acq_star': False, 'agasc_star': False}
+    """
     dat = {
         "classic": False,
         "actual_slot": -1,
@@ -204,6 +285,19 @@ def get_anom_info(anom_row, acqs):
 
 
 def acq_anom_checks(acqs):
+    """
+    Perform anomaly checks on acquisition observations.
+
+    Parameters
+    ----------
+    acqs : astropy.table.Table
+        The table of acquisition observations.
+
+    Returns
+    -------
+    astropy.table.Table
+        The table of acquisition observations with additional anomaly information.
+    """
     anom = wrong_box(acqs)
     anoms = acqs[anom]
     new_info = []
