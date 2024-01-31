@@ -89,8 +89,8 @@ def make_web_page(opt, anom_table):
     index_template_html = INDEX_TEMPLATE_PATH().read_text()
     template = jinja2.Template(index_template_html)
     table = anom_table.copy()
-    table.sort('guide_tstart', reverse=True)
-    table = table[table['classic'] == True]
+    table.sort("guide_tstart", reverse=True)
+    table = table[table["classic"] == True]
     out_html = template.render(
         anom_table=table[0:20],  # last 20 rows
     )
@@ -280,7 +280,11 @@ def get_anom_info(anom_row, acqs):
         ra, dec, radius=7.0 / 3600.0, date=anom_row["guide_tstart"]
     )
     dat.update(
-        {"agasc_star": (len(stars) > 0) & (np.any(stars["MAG_ACA"] <= (anom_row["mag_obs"] + 1.5)))})
+        {
+            "agasc_star": (len(stars) > 0)
+            & (np.any(stars["MAG_ACA"] <= (anom_row["mag_obs"] + 1.5)))
+        }
+    )
     return dat
 
 
