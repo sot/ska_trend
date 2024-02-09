@@ -302,12 +302,63 @@ def acq_anom_checks(acqs):
     return anoms
 
 
+def add_manual_entries(anom_table):
+    """
+    Add manual entries to the anomaly table.  The data is just hardcoded within this function
+    as for this trending application one can edit the file and update quickly via non-fsds process.
+
+    Parameters
+    ----------
+    anom_table : astropy.table.Table
+        The table of anomaly data.
+
+    Returns
+    -------
+    astropy.table.Table
+        The table of anomaly data with manual entries added.
+    """
+
+    table = anom_table.copy()
+    table = table[
+        "obsid",
+        "slot",
+        "classic",
+        "acq_start",
+        "guide_tstart",
+        "mag_obs",
+        "actual_slot",
+        "actual_slot_idd",
+        "actual_slot_mag_obs",
+        "another_acq_star",
+        "agasc_star",
+    ]
+
+    manual_rows = [
+        {
+            "obsid": 29221,
+            "acq_start": "2024:024:09:42:51.000",
+            "guide_tstart": CxoTime("2024:024:09:48:51.000").secs,
+            "slot": 7,
+            "actual_slot": 0,
+            "actual_slot_idd": False,
+            "another_acq_star": True,
+            "agasc_star": True,
+            "classic": True,
+            "mag_obs": 8.62,
+            "actual_slot_mag_obs": 9.19,
+        }
+    ]
+    for row in manual_rows:
+        table.add_row(row)
+    return table
+
+
 def main(sys_args=None):
     opt = get_opt().parse_args(sys_args)
 
     acqs = get_anom_acq_obs()
     anom_table = acq_anom_checks(acqs)
-
+    anom_table = add_manual_entries(anom_table)
     make_plot(opt, anom_table)
     make_web_page(opt, anom_table)
 
