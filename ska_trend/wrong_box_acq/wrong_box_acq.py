@@ -1,37 +1,33 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Update wrong-box acquisition plot.
 
-This module provides functions to update and generate a wrong-box acquisition plot and table of recent
-anomalies.
+This module provides functions to update and generate a wrong-box acquisition plot and table of
+recent anomalies.
 
 """
 
 
 import argparse
-import functools
 import os
-
 from pathlib import Path
-from typing import TypeAlias
-import jinja2
 
+import jinja2
 
 os.environ["MPLBACKEND"] = "Agg"
 
+import agasc
 import matplotlib.pyplot as plt
-import numpy as np
 import mica.stats.acq_stats
+import numpy as np
 from astropy import units as u
 from astropy.table import Table, hstack
-from ska_matplotlib import plot_cxctime
 from cxotime import CxoTime
-from ska_quatutil import yagzag2radec
 from mica.starcheck import get_starcheck_catalog
 from Quaternion import Quat
-import agasc
 from ska_helpers.logging import basic_logger
+from ska_quatutil import yagzag2radec
 
-from .. import __version__
+from ska_trend import __version__
 
 # Constants and file path definitions
 FILE_DIR = Path(__file__).parent
@@ -90,7 +86,11 @@ def make_web_page(opt, anom_table):
     template = jinja2.Template(index_template_html)
     table = anom_table.copy()
     table.sort("guide_tstart", reverse=True)
-    table = table[table["classic"] == True]
+
+    # Filter out non-classic anomalies
+    ok = table["classic"]
+    table = table[ok]
+
     out_html = template.render(
         anom_table=table[0:20],  # last 20 rows
     )
@@ -294,9 +294,7 @@ def acq_anom_checks(acqs):
     """
     anom = wrong_box(acqs)
     anoms = acqs[anom]
-    new_info = []
-    for anom_row in anoms:
-        new_info.append(get_anom_info(anom_row, acqs))
+    new_info = [get_anom_info(anom_row, acqs) for anom_row in anoms]
     new_info = Table(new_info)
     anoms = hstack([anoms, new_info])
     return anoms
@@ -304,8 +302,10 @@ def acq_anom_checks(acqs):
 
 def add_manual_entries(anom_table):
     """
-    Add manual entries to the anomaly table.  The data is just hardcoded within this function
-    as for this trending application one can edit the file and update quickly via non-fsds process.
+    Add manual entries to the anomaly table.
+
+    The data is just hardcoded within this function as for this trending application one can edit
+    the file and update quickly via non-fsds process.
 
     Parameters
     ----------

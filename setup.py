@@ -22,5 +22,10 @@ setup(
     ),
     entry_points=entry_points,
     packages=["ska_trend", "ska_trend.wrong_box_acq"],
-    package_data={"ska_trend": ["wrong_box_acq/index_template.html", "wrong_box_acq/task_schedule.cfg"]},
+    package_data={
+        "ska_trend": [
+            "wrong_box_acq/index_template.html",
+            "wrong_box_acq/task_schedule.cfg",
+        ]
+    },
 )
