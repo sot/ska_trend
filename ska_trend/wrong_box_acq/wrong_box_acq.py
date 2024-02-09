@@ -207,16 +207,6 @@ def get_anom_info(anom_row, acqs):
     dict
         Dictionary containing information about the wrong-box anomaly.
 
-    Raises
-    ------
-    None
-
-    Examples
-    --------
-    >>> anom_row = astropy.table.Row(...)
-    >>> acqs = astropy.table.Table(...)
-    >>> get_anom_info(anom_row, acqs)
-    {'classic': False, 'actual_slot': -1, 'actual_slot_idd': False, 'actual_slot_mag_obs': -1, 'another_acq_star': False, 'agasc_star': False}
     """
     dat = {
         "classic": False,
