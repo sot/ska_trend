@@ -3,7 +3,7 @@ from setuptools import setup
 
 entry_points = {
     "console_scripts": [
-        "ska_trend_wrong_box_updates=ska_trend.wrong_box_acq.wrong_box_acq:main",
+        "ska_trend_wrong_box_updates=ska_trend.wrong_box_anom.wrong_box_anom:main",
     ]
 }
 
@@ -21,11 +21,11 @@ setup(
         " Smithsonian Astrophysical Observatory\nAll rights reserved."
     ),
     entry_points=entry_points,
-    packages=["ska_trend", "ska_trend.wrong_box_acq"],
+    packages=["ska_trend", "ska_trend.wrong_box_anom"],
     package_data={
         "ska_trend": [
-            "wrong_box_acq/index_template.html",
-            "wrong_box_acq/task_schedule.cfg",
+            "wrong_box_anom/index_template.html",
+            "wrong_box_anom/task_schedule.cfg",
         ]
     },
 )
