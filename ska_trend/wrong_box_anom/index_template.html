@@ -1,0 +1,100 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html>
+
+<head>
+    <title>Wrong-box acquisition anomaly</title>
+    <link href="/mta/ASPECT/aspect.css" rel="stylesheet" type="text/css"
+        media="all" />
+    <style type="text/css">
+        tr.pink-bkg {
+            background-color: #f88
+        }
+
+        table {
+            border-width: 1px;
+            border-spacing: 0px;
+            border-style: outset;
+            border-color: gray;
+            border-collapse: separate;
+        }
+
+        table th,
+        td {
+            border-width: 1px;
+            padding: 1px 5px 1px 5px;
+            border-style: solid;
+            border-color: gray;
+        }
+    </style>
+</head>
+
+<body>
+<!--#include virtual="/mta/ASPECT/header.html"-->
+<h2>Wrong-box acquisition anomaly</h2>
+
+<img src="wrong_box.png" width="800">
+
+<h4>Last 20 Anomalies</h4>
+
+
+<table>
+    <tr>
+        <th>Obsid</th>
+        <th>Acq Start</th>
+        <th>Anom Slot</th>
+        <th>Mag Obs</th>
+        <th>Actual<br>Search Box</th>
+        <th>Actual Slot<br>ID'd</th>
+        <th>Actual Slot<br>Mag Obs</th>
+        <th>AGASC Star<br>Tracked</th>
+        <th>Anom is Another<br>Acq Star</th>
+    </tr>
+    {% for anom in anom_table %}
+    <tr {{anom['tr_class']}}>
+        <td> {{anom['obsid']}} </td>
+        <td> {{anom['acq_start']}} </td>
+        <td align="center"> {{anom['slot']}} </td>
+        <td align="center"> {{"%4.2f"|format(anom['mag_obs'])}} </td>
+        <td align="center"> {{anom['actual_slot']}} </td>
+        <td align="center"> {{anom['actual_slot_idd']}} </td>
+        <td align="center"> {{"%4.2f"|format(anom['actual_slot_mag_obs'])}} </td>
+        <td align="center"> {{anom['agasc_star']}} </td>
+        <td align="center"> {{anom['another_acq_star']}} </td>
+    </tr>
+    {% endfor %}
+</table>
+
+<h3>Key</h3>
+
+<dl>
+    <dt>Obsid</dt>
+    <dd>Obsid</dd>
+    <dt>Acq Start</dt>
+    <dd>Acquisition start time</dd>
+    <dt>Anom Slot</dt>
+    <dd>Slot number of the anomaly</dd>
+    <dt>Mag Obs</dt>
+    <dd>Observed magnitude of anomaly slot</dd>
+    <dt>Actual Search Box</dt>
+    <dd>Slot number / Search Box within which the y/z of the anomaly slot is actually found</dd>
+    <dt>Actual Slot ID'd</dt>
+    <dd>True if the Actual Slot was still identified</dd>
+    <dt>Actual Slot Mag Obs</dt>
+    <dd>Observed magnitude of the Actual Slot</dd>
+    <dt>AGASC Star Tracked</dt>
+    <dd>True if the anomaly object could be an AGASC star (if there exists one more more stars
+        as faint as 1.5 mags fainter than maxmag and within 7 arcsecs)</dd>
+    <dt>Is Another Acq Star</dt>
+    <dd>True if the anomaly object is an acquisition star intended for another slot</dd>
+</dl>
+
+<h3><a href="https://occweb.cfa.harvard.edu/twiki/bin/view/Aspect/ACAAcquisitionAnomaly">
+    Acquisition Anomaly Twiki Page</a></h3>
+
+
+<!--#include virtual="/mta/ASPECT/footer.html"-->
+<!--footer end-->
+
+</body>
+
+</html>
