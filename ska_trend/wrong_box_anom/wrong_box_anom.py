@@ -333,6 +333,7 @@ def add_manual_entries(anom_table):
         "agasc_star",
     ]
 
+    # TODO - move manual data out of the Python code and into an ecsv file
     manual_rows = [
         {
             "obsid": 29221,
