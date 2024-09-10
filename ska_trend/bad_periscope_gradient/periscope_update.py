@@ -35,7 +35,7 @@ def get_opt():
 
 def check_for_bad_times(start):
     """
-    Review perigee gradient data for discontinuities and bad data.
+    Review periscope gradient data for discontinuities and bad data.
 
     This uses 0.0032 K as the quantization and checks that the difference between
     consecutive samples are not more than 5 * quantization.  Times with samples
@@ -99,12 +99,13 @@ def check_for_bad_times(start):
 
 
 def send_process_email(opt, bad_science_data):
-    subject = "perigee gradient data: bad data or discontinuities found"
+    subject = "periscope gradient data: bad data or discontinuities found"
     lines = [
-        "Discontinuities found in perigee gradient data.",
+        "Discontinuities found in periscope gradient data.",
         "Check V&V for these science observations.",
     ]
-    lines.extend(bad_science_data.pformat(max_lines=-1, max_width=-1))
+    cols = ['date', 'manvr_obsid', 'msid', 'AOPCADMD', 'AOACASEQ', 'COBSRQID']
+    lines.extend(bad_science_data[cols].pformat(max_lines=-1, max_width=-1))
     text = "\n".join(lines)
     logger.info(text)
     send_mail(logger, opt, subject, text, __file__)
@@ -126,6 +127,8 @@ def main(sys_args=None):
     bads = check_for_bad_times(start)
 
     if len(bads) > 0:
+        bads.sort('time')
+
         # If the obsid associated with the last maneuver before an event
         # was a science obsid then send an email alert.
         bad_science = (
