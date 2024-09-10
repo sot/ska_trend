@@ -2,10 +2,11 @@
 """Check for bad data and discontinuities in periscope gradients"""
 
 import argparse
+import smtplib
+from email.mime.text import MIMEText
 from pathlib import Path
 
 import numpy as np
-from acdc.common import send_mail
 from astropy.table import Table, vstack
 from cheta import fetch
 from cxotime import CxoTime
@@ -100,15 +101,20 @@ def check_for_bad_times(start):
 
 def send_process_email(opt, bad_science_data):
     subject = "periscope gradient data: bad data or discontinuities found"
-    lines = [
-        "Discontinuities found in periscope gradient data.",
-        "Check V&V for these science observations.",
+    cols = ["date", "msid", "AOPCADMD", "AOACASEQ", "COBSRQID", "manvr_obsid"]
+    data_html = bad_science_data[cols].pformat(max_lines=-1, max_width=-1, html=True)
+    text = [
+        "Discontinuities found in periscope gradient data."
+        "Check V&V for these science observations."
     ]
-    cols = ['date', 'manvr_obsid', 'msid', 'AOPCADMD', 'AOACASEQ', 'COBSRQID']
-    lines.extend(bad_science_data[cols].pformat(max_lines=-1, max_width=-1))
-    text = "\n".join(lines)
-    logger.info(text)
-    send_mail(logger, opt, subject, text, __file__)
+    text.extend(data_html)
+    msg = MIMEText("\n".join(text), "html")
+    msg["Subject"] = subject
+    me = "aca@cfa.harvard.edu"
+    msg["From"] = me
+    msg["To"] = ", ".join(opt.emails)
+    s = smtplib.SMTP("localhost")
+    s.sendmail(me, [opt.emails], msg.as_string())
 
 
 def main(sys_args=None):
@@ -127,7 +133,7 @@ def main(sys_args=None):
     bads = check_for_bad_times(start)
 
     if len(bads) > 0:
-        bads.sort('time')
+        bads.sort("time")
 
         # If the obsid associated with the last maneuver before an event
         # was a science obsid then send an email alert.
