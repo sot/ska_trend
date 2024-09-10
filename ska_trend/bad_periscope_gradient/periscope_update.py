@@ -113,6 +113,7 @@ def send_process_email(opt, bad_science_data):
 def main(sys_args=None):
     opt = get_opt().parse_args(sys_args)
 
+    Path(opt.outdir).mkdir(parents=True, exist_ok=True)
     data_file = Path(opt.out_dir) / "data.ecsv"
 
     start = "2001:001"
@@ -124,6 +125,8 @@ def main(sys_args=None):
     bads = check_for_bad_times(start)
 
     if len(bads) > 0:
+        # If the obsid associated with the last maneuver before an event
+        # was a science obsid then send an email alert.
         bad_science = (
             (bads["manvr_obsid"] != -999)
             & (bads["manvr_obsid"] != 0)
@@ -132,6 +135,7 @@ def main(sys_args=None):
         if np.any(bad_science):
             send_process_email(opt, bads[bad_science])
 
+        # Append the new bad data to the existing data file
         if hiccups is not None:
             hiccups = vstack([hiccups, bads])
         else:
