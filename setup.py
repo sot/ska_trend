@@ -22,11 +22,12 @@ setup(
         " Smithsonian Astrophysical Observatory\nAll rights reserved."
     ),
     entry_points=entry_points,
-    packages=["ska_trend", "ska_trend.wrong_box_anom"],
+    packages=["ska_trend", "ska_trend.wrong_box_anom", "ska_trend.bad_periscope_gradient"],
     package_data={
         "ska_trend": [
             "wrong_box_anom/index_template.html",
             "wrong_box_anom/task_schedule.cfg",
+            "bad_periscope_gradient/task_schedule.cfg",
         ]
     },
 )
