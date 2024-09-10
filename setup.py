@@ -4,6 +4,7 @@ from setuptools import setup
 entry_points = {
     "console_scripts": [
         "ska_trend_wrong_box_updates=ska_trend.wrong_box_anom.wrong_box_anom:main",
+        "ska_trend_bad_periscope=ska_trend.bad_periscope_gradient.periscope_update:main",
     ]
 }
 
