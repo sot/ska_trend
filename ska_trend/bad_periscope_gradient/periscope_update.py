@@ -122,6 +122,7 @@ def main(sys_args=None):
         hiccups = Table.read(data_file)
         start = hiccups["time"].max()
 
+    logger.info("Checking for bad data starting at {}".format(start))
     bads = check_for_bad_times(start)
 
     if len(bads) > 0:
@@ -133,6 +134,7 @@ def main(sys_args=None):
             & (bads["manvr_obsid"] < 38000)
         )
         if np.any(bad_science):
+            logger.info(f"Sending email alert for {len(bads[bad_science])} obsids")
             send_process_email(opt, bads[bad_science])
 
         # Append the new bad data to the existing data file
@@ -141,6 +143,7 @@ def main(sys_args=None):
         else:
             hiccups = bads
         hiccups.sort("time")
+        logger.info("Writing data to {}".format(data_file))
         hiccups.write(data_file, format="ascii.ecsv", overwrite=True)
 
 
