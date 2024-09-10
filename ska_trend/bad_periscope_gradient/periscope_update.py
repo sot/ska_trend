@@ -113,7 +113,7 @@ def send_process_email(opt, bad_science_data):
 def main(sys_args=None):
     opt = get_opt().parse_args(sys_args)
 
-    Path(opt.outdir).mkdir(parents=True, exist_ok=True)
+    Path(opt.out_dir).mkdir(parents=True, exist_ok=True)
     data_file = Path(opt.out_dir) / "data.ecsv"
 
     start = "2001:001"
