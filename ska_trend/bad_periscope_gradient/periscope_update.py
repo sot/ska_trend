@@ -70,31 +70,52 @@ def check_for_bad_times(start):
         nok = np.abs(diff) > quantization * quant_mult
 
         for hit in np.where(nok)[0]:
+            hit_time = dat.times[hit]
             event = {
-                "time": dat.times[hit],
-                "date": CxoTime(dat.times[hit]).date,
+                "time": hit_time,
+                "date": CxoTime(hit_time).date,
                 "msid": msid,
             }
-            local_manvrs = events.manvrs.filter(
-                start=dat.times[hit] - (7 * 86400), stop=dat.times[hit] + (1 * 86400)
-            )
+
+            # There is value in getting the telemetered obsid and the state of
+            # AOPCADMD and AOACASEQ at the time of the discontiuity/hit.  However,
+            # for the times when there are discontiuities in OOBAGRD3 and OOBAGRD6
+            # there is often missing data / gaps in telemetry at safe modes.
+            # So fetch these from cheta but use trivial defaults in the output table
+            # if the data is missing.
             extra_msids = ["COBSRQID", "AOPCADMD", "AOACASEQ"]
             extra_defaults = {"COBSRQID": 0, "AOPCADMD": "N/A", "AOACASEQ": "N/A"}
             for extra_msid in extra_msids:
-                mdat = fetch.Msid(extra_msid, dat.times[hit] - 200, dat.times[hit] + 50)
-                # get last sample before hit
-                hit_idx = np.searchsorted(mdat.times, dat.times[hit])
+                mdat = fetch.Msid(extra_msid, hit_time - 200, hit_time + 50)
+
+                # Get last msid sample before discontinuity/hit
+                hit_idx = np.searchsorted(mdat.times, hit_time)
+
+                # If the telemetry doesn't cover the hit_time or is empty,
+                # searchsorted returns 0.  Use the defaults in those cases.
                 if hit_idx == 0:
                     event.update({extra_msid: extra_defaults[extra_msid]})
                 else:
                     event.update({extra_msid: mdat.vals[hit_idx - 1]})
+
+            # The last nominal obsid for the maneuver before a discontiuity
+            # is the obsid that should be checked in V&V if there is a problem,
+            # so fetch this from kadi manvrs. There should be an easier way
+            # to get the last one before an event, but, again keeping in mind
+            # that there are often gaps in telemetry at safe modes, fetches
+            # 7 days before the event and 1 day after the event and tries to
+            # get the last maneuver that started before the event.
+            local_manvrs = events.manvrs.filter(
+                start=hit_time - (7 * 86400), stop=hit_time + (1 * 86400)
+            )
             last_manvr = None
             for manvr in local_manvrs:
-                if manvr.tstart < dat.times[hit]:
+                if manvr.tstart < hit_time:
                     last_manvr = manvr
             event.update({"manvr_obsid": last_manvr.obsid})
             event.update({"manvr_tstart": last_manvr.tstart})
             event.update({"manvr_tstop": last_manvr.tstop})
+
             bad_events.append(event.copy())
     return Table(bad_events)
 
