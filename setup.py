@@ -5,6 +5,7 @@ entry_points = {
     "console_scripts": [
         "ska_trend_wrong_box_updates=ska_trend.wrong_box_anom.wrong_box_anom:main",
         "ska_trend_bad_periscope=ska_trend.bad_periscope_gradient.periscope_update:main",
+        "ska_trend_periscope_drift=ska_trend.periscope_drift.scripts.periscope_drift_reports:main",
     ]
 }
 
@@ -26,12 +27,18 @@ setup(
         "ska_trend",
         "ska_trend.wrong_box_anom",
         "ska_trend.bad_periscope_gradient",
+        "ska_trend.periscope_drift",
+        "ska_trend.periscope_drift.scripts",
     ],
     package_data={
         "ska_trend": [
             "wrong_box_anom/index_template.html",
             "wrong_box_anom/task_schedule.cfg",
             "bad_periscope_gradient/task_schedule.cfg",
-        ]
+        ],
+        "ska_trend.periscope_drift": [
+            "task_schedule.cfg",
+            "templates/periscope_drift/index.html",
+        ],
     },
 )
