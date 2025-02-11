@@ -22,12 +22,11 @@ from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.plot import plot_stars
 from chandra_aca.transform import yagzag_to_pixels
 from kadi import events
+from mica.starcheck import get_att, get_mp_dir, get_starcat
 from Quaternion import Quat
 from Ska.engarchive import fetch
 from Ska.Matplotlib import plot_cxctime
 from Ska.Numpy import interpolate
-
-from mica.starcheck import get_att, get_mp_dir, get_starcat
 
 GUIDE_METRICS_OBSID = "guide_metrics_obsid.dat"
 GUIDE_METRICS_SLOT = "guide_metrics_slot.dat"
@@ -84,7 +83,7 @@ def get_dr_dp_dy(refs, atts):
     dps = []
     dys = []
 
-    for ref_q, att_q in zip(refs, atts):
+    for ref_q, att_q in zip(refs, atts, strict=True):
         dq = Quat(ref_q).dq(att_q)
         drs.append(dq.roll0 * 3600)
         dps.append(dq.pitch * 3600)
@@ -128,7 +127,7 @@ def get_observed_att_errors(obsid, crs=None, on_the_fly=False):
     elif crs is None:
         raise Exception("Provide crs if on_the_fly is False")
 
-    if all([item is None for item in crs["ground"].values()]):
+    if all(item is None for item in crs["ground"].values()):
         # No good ground solution in any of the slots
         # Use obc aspect solution
         flag = 1
@@ -321,36 +320,7 @@ def get_observed_metrics(obsid, metrics_file=None):
     preceding_roll_err = get_ending_roll_err(obsid_preceding, metrics_file=metrics_file)
 
     # Aberration correction
-    aber_flag = 0
-    path_ = get_mp_dir(obsid)[0]
-    if path_ is None:
-        logger.info(f"No mp_dir for {obsid}. Skipping aber correction")
-        aber_y = -9999
-        aber_z = -9999
-        aber_flag = 1
-    else:
-        mp_dir = f"/data/mpcrit1/mplogs/{path_}"
-        manerr = glob(f"{mp_dir}/*ManErr.txt")
-
-        if len(manerr) == 0:
-            logger.info(f"No ManErr file for {obsid}. Skipping aber correction")
-            aber_y = -9999
-            aber_z = -9999
-            aber_flag = 2
-        else:
-            dat = ascii.read(manerr[0], header_start=2, data_start=3)
-            ok = dat["obsid"] == obsid
-
-            if np.sum(ok) > 1:
-                logger.info(
-                    f"More than one entry per {obsid}. Skipping aber correction"
-                )
-                aber_y = -9999
-                aber_z = -9999
-                aber_flag = 3
-            else:
-                aber_y = dat["aber-Y"][ok][0]
-                aber_z = dat["aber-Z"][ok][0]
+    aber_flag, aber_y, aber_z = get_aberration_correction(obsid)
 
     if aber_flag == 0:
         one_shot_aber_corrected = np.sqrt(
@@ -381,61 +351,122 @@ def get_observed_metrics(obsid, metrics_file=None):
         "dwell": True,
     }
 
-    out_slot = {"obsid": obsid, "slots": {k: {} for k in range(8)}}
-
     cat = crs["cat"]
-    d = events.dwells.filter(obsid=obsid)[0]
-    logger.info(f"Dwell at {d.start}")
+    dwell0 = events.dwells.filter(obsid=obsid)[0]
+    logger.info(f"Dwell at {dwell0.start}")
 
-    for slot in range(8):
-        ok = cat["slot"] == slot
-        out = {}
-        if len(cat[ok]) > 0:
-            out["id"] = cat["id"][ok][0]
-            out["type"] = cat["type"][ok][0]
-            out["mag"] = cat["mag"][ok][0]
-            out["yang"] = cat["yang"][ok][0]
-            out["zang"] = cat["zang"][ok][0]
-            out["slot"] = slot
-
-            if att_flag == 0:
-                # Ground solution exists
-                val = crs["ground"][slot]
-            else:
-                # Use obc solution
-                val = crs["obc"][slot]
-
-            if len(val.dyags) > 0 and len(val.dzags) > 0:
-                out["std_dy"] = np.std(val.dyags)
-                out["std_dz"] = np.std(val.dzags)
-                out["rms_dy"] = np.sqrt(np.mean(val.dyags**2))
-                out["rms_dz"] = np.sqrt(np.mean(val.dzags**2))
-                out["median_dy"] = np.median(val.dyags)
-                out["median_dz"] = np.median(val.dzags)
-                drs = np.sqrt((val.dyags**2) + (val.dzags**2))
-                for dist in ["1.5", "3.0", "5.0"]:
-                    out[f"f_within_{dist}"] = np.count_nonzero(drs < float(dist)) / len(
-                        drs
-                    )
-            else:
-                for metric in [
-                    "std_dy",
-                    "std_dz",
-                    "rms_dy",
-                    "rms_dz",
-                    "median_dy",
-                    "median_dz",
-                ]:
-                    out[metric] = -9999
-                for metric in ["f_within_5.0", "f_within_3.0", "f_within_1.5"]:
-                    out[metric] = 0
-
-            mags = fetch.Msid(f"aoacmag{slot}", start=d.start, stop=d.stop)
-            out["median_mag"] = np.median(mags.vals)
-
-            out_slot["slots"][slot] = out
+    slots = {
+        slot: populate_slot_metrics(att_flag, crs, cat, dwell0, slot)
+        for slot in range(8)
+    }
+    out_slot = {"obsid": obsid, "slots": slots}
 
     return out_obsid, out_slot
+
+
+def get_aberration_correction(obsid):
+    """
+    Get the aberration correction values for a given observation ID (obsid).
+
+    This function retrieves the aberration correction values (aber-Y and aber-Z)
+    from the ManErr.txt file located in the mission planning directory for the
+    specified obsid. If the directory or file is not found, or if there are
+    issues with the data, appropriate flags and default values are returned.
+
+    Parameters
+    ----------
+    obsid : int
+        Observation ID for which to retrieve aberration correction values.
+
+    Returns
+    -------
+    aber_flag, aber_y, aber_z :
+        - aber_flag (int): A flag indicating the status of the aberration correction retrieval:
+            0 - Successful retrieval.
+            1 - No mission planning directory found for the given obsid.
+            2 - No ManErr.txt file found in the mission planning directory.
+            3 - More than one entry found for the given obsid in the ManErr.txt file.
+        - aber_y (float): Aberration correction value for the Y-axis. Default is -9999 if not found.
+        - aber_z (float): Aberration correction value for the Z-axis. Default is -9999 if not found.
+    """
+    aber_flag = 0
+    path_ = get_mp_dir(obsid)[0]
+    if path_ is None:
+        logger.info(f"No mp_dir for {obsid}. Skipping aber correction")
+        aber_y = -9999
+        aber_z = -9999
+        aber_flag = 1
+    else:
+        mp_dir = f"/data/mpcrit1/mplogs/{path_}"
+        manerr = glob(f"{mp_dir}/*ManErr.txt")
+
+        if len(manerr) == 0:
+            logger.info(f"No ManErr file for {obsid}. Skipping aber correction")
+            aber_y = -9999
+            aber_z = -9999
+            aber_flag = 2
+        else:
+            dat = ascii.read(manerr[0], header_start=2, data_start=3)
+            ok = dat["obsid"] == obsid
+
+            if np.sum(ok) > 1:
+                logger.info(
+                    f"More than one entry per {obsid}. Skipping aber correction"
+                )
+                aber_y = -9999
+                aber_z = -9999
+                aber_flag = 3
+            else:
+                aber_y = dat["aber-Y"][ok][0]
+                aber_z = dat["aber-Z"][ok][0]
+    return aber_flag, aber_y, aber_z
+
+
+def populate_slot_metrics(att_flag, crs, cat, d, slot):
+    ok = cat["slot"] == slot
+    out = {}
+    if len(cat[ok]) > 0:
+        out["id"] = cat["id"][ok][0]
+        out["type"] = cat["type"][ok][0]
+        out["mag"] = cat["mag"][ok][0]
+        out["yang"] = cat["yang"][ok][0]
+        out["zang"] = cat["zang"][ok][0]
+        out["slot"] = slot
+
+        if att_flag == 0:
+            # Ground solution exists
+            val = crs["ground"][slot]
+        else:
+            # Use obc solution
+            val = crs["obc"][slot]
+
+        if len(val.dyags) > 0 and len(val.dzags) > 0:
+            out["std_dy"] = np.std(val.dyags)
+            out["std_dz"] = np.std(val.dzags)
+            out["rms_dy"] = np.sqrt(np.mean(val.dyags**2))
+            out["rms_dz"] = np.sqrt(np.mean(val.dzags**2))
+            out["median_dy"] = np.median(val.dyags)
+            out["median_dz"] = np.median(val.dzags)
+            drs = np.sqrt((val.dyags**2) + (val.dzags**2))
+            for dist in ["1.5", "3.0", "5.0"]:
+                out[f"f_within_{dist}"] = np.count_nonzero(drs < float(dist)) / len(drs)
+        else:
+            for metric in [
+                "std_dy",
+                "std_dz",
+                "rms_dy",
+                "rms_dz",
+                "median_dy",
+                "median_dz",
+            ]:
+                out[metric] = -9999
+            for metric in ["f_within_5.0", "f_within_3.0", "f_within_1.5"]:
+                out[metric] = 0
+
+        mags = fetch.Msid(f"aoacmag{slot}", start=d.start, stop=d.stop)
+        out["median_mag"] = np.median(mags.vals)
+
+        return out
 
 
 def get_n_kalman(start, stop):
@@ -824,7 +855,8 @@ class NoDwellError(ValueError):
     pass
 
 
-def update_observed_metrics(
+# TODO refactor this to get rid of the PLR0912, PLR0915 warnings
+def update_observed_metrics(  # noqa: PLR0912, PLR0915
     obsid=None,
     start=None,
     stop=None,
