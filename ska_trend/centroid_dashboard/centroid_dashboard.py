@@ -1,19 +1,12 @@
 #!/usr/bin/env python
 
+import argparse
 import os
 from glob import glob
 
-# Matplotlib setup
-# Use Agg backend for command-line (non-interactive) operation
-import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
-
-if __name__ == "__main__":
-    matplotlib.use("Agg")
-import argparse
-
-import matplotlib.pylab as plt
-import pyyaks.logger
+import ska_helpers.logging
 from agasc import get_star
 from astropy.io import ascii
 from astropy.table import Table, vstack
@@ -21,60 +14,46 @@ from Chandra.Time import DateTime
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.plot import plot_stars
 from chandra_aca.transform import yagzag_to_pixels
+from cheta import fetch
 from kadi import events
 from mica.starcheck import get_att, get_mp_dir, get_starcat
 from Quaternion import Quat
-from Ska.engarchive import fetch
-from Ska.Matplotlib import plot_cxctime
-from Ska.Numpy import interpolate
+from ska_matplotlib import plot_cxctime
+from ska_numpy import interpolate
 
 GUIDE_METRICS_OBSID = "guide_metrics_obsid.dat"
 GUIDE_METRICS_SLOT = "guide_metrics_slot.dat"
 MICA_REPORTS = "https://icxc.harvard.edu/aspect/mica_reports/"
 MICA_PORTAL = "http://kadi.cfa.harvard.edu/mica/?obsid_or_date="
-CD_ROOT = "/proj/sot/ska/www/ASPECT_ICXC/centroid_reports"
 
-# Set up logging
-loglevel = pyyaks.logger.INFO
-logger = pyyaks.logger.get_logger(
-    name="centroid_dashboard", level=loglevel, format="%(asctime)s %(message)s"
-)
+logger = ska_helpers.logging.basic_logger(__name__, level="INFO")
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS) days
 NDAYS = 7
 
 
-def get_opt(args=None):
+def get_opt():
     parser = argparse.ArgumentParser(description="Centroid dashboard")
     parser.add_argument("--obsid", help="Processing obsid (default=None)")
     parser.add_argument(
-        "--start", help=f"Processing start date (default=NOW - {NDAYS} days)"
+        "--start",
+        help=f"Processing start date (default=stop - {NDAYS} days)",
     )
-    parser.add_argument("--stop", help="Processing stop date (default=NOW)")
+    parser.add_argument(
+        "--stop",
+        help="Processing stop date (default=NOW)",
+    )
     parser.add_argument(
         "--data-root",
-        default=CD_ROOT,
-        help=f"Root directory for data files (default='{CD_ROOT}')",
+        required=True,
+        help="Root directory for data files (required)')",
     )
-    add_bool_arg(
-        parser=parser, name="make_plots", help_="make plots if the option is included"
+    parser.add_argument(
+        "--force",
+        help="Force processing even if data exists",
+        action="store_true",
     )
-    add_bool_arg(
-        parser=parser, name="save", help_="save plots if the option is included"
-    )
-    add_bool_arg(
-        parser=parser, name="force", help_="force processing if the option is included"
-    )
-    return parser.parse_args(args)
-
-
-def add_bool_arg(parser, name, default=True, help_=""):
-    group = parser.add_mutually_exclusive_group(required=False)
-    group.add_argument(f"--{name}", dest=name, action="store_true", help=help_)
-    group.add_argument(
-        f"--no-{name}", dest=name, action="store_false", help=f"Don't {help_}"
-    )
-    parser.set_defaults(**{name: default})
+    return parser
 
 
 def get_dr_dp_dy(refs, atts):
@@ -783,7 +762,7 @@ def plot_observed_metrics(
     plot_dir,
     coord="dr",
     att_errors=None,
-    factor=20,
+    scale_factor=20,
     save=False,
     on_the_fly=False,
 ):
@@ -820,7 +799,7 @@ def plot_observed_metrics(
             kwargs["on_the_fly"] = False
 
         plot_crs_per_obsid(obsid, plot_dir, crs=crs, **kwargs)
-        plot_crs_visualization(obsid, plot_dir, factor=factor, crs=crs, **kwargs)
+        plot_crs_visualization(obsid, plot_dir, factor=scale_factor, crs=crs, **kwargs)
         plot_n_kalman(obsid, plot_dir, save=save)
 
 
@@ -857,12 +836,12 @@ class NoDwellError(ValueError):
 
 # TODO refactor this to get rid of the PLR0912, PLR0915 warnings
 def update_observed_metrics(  # noqa: PLR0912, PLR0915
+    data_root,
+    *,
     obsid=None,
     start=None,
     stop=None,
-    data_root=None,
     force=False,
-    factor=20,
     make_plots=False,
     save=False,
 ):
@@ -889,10 +868,7 @@ def update_observed_metrics(  # noqa: PLR0912, PLR0915
         # Get obsids, both science and ERs
         obsids = [evt.obsid for evt in events.obsids.filter(start, stop)]
     else:
-        obsids = [np.int(obsid)]
-
-    if data_root is None:
-        data_root = CD_ROOT
+        obsids = [int(obsid)]
 
     obsid_metrics_file = os.path.join(data_root, GUIDE_METRICS_OBSID)
     slot_metrics_file = os.path.join(data_root, GUIDE_METRICS_SLOT)
@@ -947,13 +923,12 @@ def update_observed_metrics(  # noqa: PLR0912, PLR0915
                 continue
 
             if make_plots:
-                kwargs = {"factor": factor, "save": save}
                 plot_observed_metrics(
                     obsid,
                     plot_dir=obs_dir,
                     coord="dr",
                     att_errors=metrics_obsid["att_errors"],
-                    **kwargs,
+                    save=save,
                 )
         except (NoObsidError, NoDwellError, NoManvrError) as err:
             logger.info(f"Skipping obsid {obsid} missing data: {err}")
@@ -1395,20 +1370,19 @@ Next Observation
         outfile.write(string)
 
 
-def main():
-    opt = get_opt()
-    logger.info("Centroid dashboard, started")
+def main(args=None):
+    # Main application is strictly non-interative plots
+    plt.switch_backend("Agg")
+
+    opt = get_opt().parse_args(args)
+    logger.info("Start processing")
     update_observed_metrics(
+        data_root=opt.data_root,
         obsid=opt.obsid,
         start=opt.start,
         stop=opt.stop,
         force=opt.force,
-        data_root=opt.data_root,
-        make_plots=opt.make_plots,
-        save=opt.save,
+        make_plots=True,
+        save=True,
     )
-    logger.info("Centroid dashboard, ended")
-
-
-if __name__ == "__main__":
-    main()
+    logger.info("End processing")
