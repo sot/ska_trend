@@ -2,24 +2,29 @@
 
 import argparse
 import os
+from dataclasses import dataclass
 from glob import glob
+from pathlib import Path
 
+import astropy.units as u
 import matplotlib.pyplot as plt
 import numpy as np
 import ska_helpers.logging
 from agasc import get_star
 from astropy.io import ascii
 from astropy.table import Table, vstack
-from Chandra.Time import DateTime
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.plot import plot_stars
 from chandra_aca.transform import yagzag_to_pixels
 from cheta import fetch
+from cxotime import CxoTime, CxoTimeDescriptor
 from kadi import events
 from mica.starcheck import get_att, get_mp_dir, get_starcat
 from Quaternion import Quat
 from ska_matplotlib import plot_cxctime
 from ska_numpy import interpolate
+
+SKA = Path(os.environ["SKA"])
 
 GUIDE_METRICS_OBSID = "guide_metrics_obsid.dat"
 GUIDE_METRICS_SLOT = "guide_metrics_slot.dat"
@@ -290,7 +295,7 @@ def get_observed_metrics(obsid, metrics_file=None):
     drs = att_errors["dr"]
     dr50 = float(np.percentile(np.abs(drs), 50))
     dr95 = float(np.percentile(np.abs(drs), 95))
-    mean_date = DateTime(0.5 * (att_errors["time"][0] + att_errors["time"][-1])).date
+    mean_date = CxoTime(0.5 * (att_errors["time"][0] + att_errors["time"][-1])).date
 
     # Centroid residuals
     crs = att_errors["crs"]
@@ -376,7 +381,7 @@ def get_aberration_correction(obsid):
         aber_z = -9999
         aber_flag = 1
     else:
-        mp_dir = f"/data/mpcrit1/mplogs/{path_}"
+        mp_dir = SKA / f"/data/mpcrit1/mplogs/{path_}"
         manerr = glob(f"{mp_dir}/*ManErr.txt")
 
         if len(manerr) == 0:
@@ -452,8 +457,8 @@ def get_n_kalman(start, stop):
     """
     Get the AOKALSTR data with number of kalman stars reported by OBC
     """
-    start = DateTime(start).date
-    stop = DateTime(stop).date
+    start = CxoTime(start).date
+    stop = CxoTime(stop).date
     dat = fetch.Msid("aokalstr", start, stop)
     dat.interpolate(1.025)
     return dat
@@ -502,7 +507,7 @@ def plot_att_errors_per_obsid(
         raise ValueError("Need to provide att_errors if on_the_fly is False")
 
     errs = att_errors[coord]
-    dates = DateTime(att_errors["time"])
+    dates = CxoTime(att_errors["time"])
 
     plt.figure(figsize=(8, 2.5))
 
@@ -648,7 +653,7 @@ def plot_n_kalman(obsid, plot_dir, save=False):
     plot_cxctime(n_kalman.times, n_kalman.vals.astype(int), color="k")
     plot_cxctime([t0, t0 + 1000], [0.5, 0.5], lw=3, color="orange")
 
-    plt.text(DateTime(t0).plotdate, 0.7, "1 ksec")
+    plt.text(CxoTime(t0).plot_date, 0.7, "1 ksec")
     plt.ylabel("# Kalman stars")
     ylims = plt.ylim()
     plt.ylim(-0.2, ylims[1] + 0.2)
@@ -834,6 +839,12 @@ class NoDwellError(ValueError):
     pass
 
 
+@dataclass
+class Observation:
+    obsid_obs: int
+    starcat_date: CxoTime = CxoTimeDescriptor()
+
+
 # TODO refactor this to get rid of the PLR0912, PLR0915 warnings
 def update_observed_metrics(  # noqa: PLR0912, PLR0915
     data_root,
@@ -863,8 +874,8 @@ def update_observed_metrics(  # noqa: PLR0912, PLR0915
 
     if obsid is None:
         # Default is between NOW and (NOW - NDAYS) days
-        start = DateTime(start) - (NDAYS if start is None else 0)
-        stop = DateTime(stop)
+        start = CxoTime(start) - (NDAYS if start is None else 0) * u.day
+        stop = CxoTime(stop)
         # Get obsids, both science and ERs
         obsids = [evt.obsid for evt in events.obsids.filter(start, stop)]
     else:
@@ -879,9 +890,6 @@ def update_observed_metrics(  # noqa: PLR0912, PLR0915
     rows_obsid = []
     rows_slots = []
     for obsid in obsids:  # noqa: PLR1704 redefining obsid
-        logger.info(f"Obsid={obsid}")
-        obs_dir = get_cd_dir(obsid, data_root)
-
         if obsid in processed_obsids:
             if not force:
                 logger.info(f"Skipping obsid {obsid}: already processed")
@@ -895,110 +903,135 @@ def update_observed_metrics(  # noqa: PLR0912, PLR0915
                     ok = dat_slot_old["obsid"] == obsid
                     dat_slot_old.remove_rows(ok)
 
-        try:
-            metrics_obsid, metrics_slot = get_observed_metrics(
-                obsid, metrics_file=obsid_metrics_file
-            )
-
-            if not metrics_obsid["dwell"]:
-                logger.info(f"Skipping obsid {obsid}: not a dwell?")
-                info = "Not a dwell"
-                make_special_case_html(metrics_obsid, obs_dir, info=info)
-                continue
-
-            if metrics_obsid["att_flag"] > 1:
-                logger.info(
-                    f"Skipping obsid {obsid}: problem matching obc/ground times"
-                )
-                info = "Problem matching obc/ground att times"
-                make_special_case_html(metrics_obsid, obs_dir, info=info)
-                continue
-
-            if obsid < 40000 and metrics_obsid["att_flag"] == 1:
-                logger.info(
-                    f"Skipping science obsid {obsid}: no ground aspect solution"
-                )
-                info = "No ground aspect solution for science obsid"
-                make_special_case_html(metrics_obsid, obs_dir, info=info)
-                continue
-
-            if make_plots:
-                plot_observed_metrics(
-                    obsid,
-                    plot_dir=obs_dir,
-                    coord="dr",
-                    att_errors=metrics_obsid["att_errors"],
-                    save=save,
-                )
-        except (NoObsidError, NoDwellError, NoManvrError) as err:
-            logger.info(f"Skipping obsid {obsid} missing data: {err}")
-            continue
-        except Exception as err:
-            logger.warning(f"Skipping obsid {obsid} ERROR: {err}")
-            continue
-
-        # Process entries for 'per obsid' metrics
-
-        keys_obsid = (
-            "obsid",
-            "mean_date",
-            "att_flag",
-            "dr50",
-            "dr95",
-            "aber_y",
-            "aber_z",
-            "aber_flag",
-            "one_shot_pitch",
-            "one_shot_yaw",
-            "one_shot",
-            "one_shot_aber_corrected",
-            "manvr_angle",
-            "preceding_roll_err",
-            "ending_roll_err",
-            "obsid_preceding",
-            "obsid_next",
+        process_observation(
+            obsid,
+            rows_obsid,
+            rows_slots,
+            data_root,
+            obsid_metrics_file,
+            slot_metrics_file,
+            make_plots,
+            save,
+            dat_obsid_old,
+            dat_slot_old,
         )
 
-        row_obsid = {k: metrics_obsid[k] for k in keys_obsid}
-        rows_obsid.append(row_obsid)
 
-        # Process entries for 'per slot' metrics
-        row_slots = []
-        for slot in range(8):
-            out = {}
-            slot_data = metrics_slot["slots"][slot]
-            if bool(slot_data):
-                out["obsid"] = obsid
-                out["slot"] = slot
-                out["mean_date"] = metrics_obsid["mean_date"]
-                keys_slot = (
-                    "id",
-                    "type",
-                    "mag",
-                    "yang",
-                    "zang",
-                    "median_mag",
-                    "median_dy",
-                    "median_dz",
-                )
-                out.update({k: slot_data[k] for k in keys_slot})
-                # Needed to build html
-                row_slots.append(out)
-                # Needed to update 'per slot' data file
-                rows_slots.append(out)
+def process_observation(
+    obsid,
+    rows_obsid,
+    rows_slots,
+    data_root,
+    obsid_metrics_file,
+    slot_metrics_file,
+    make_plots,
+    save,
+    dat_obsid_old,
+    dat_slot_old,
+):
+    logger.info(f"Obsid={obsid}")
+    obs_dir = get_cd_dir(obsid, data_root)
 
-        # Build html page for this obsid
-        make_html(row_obsid, row_slots, obs_dir)
+    try:
+        metrics_obsid, metrics_slot = get_observed_metrics(
+            obsid, metrics_file=obsid_metrics_file
+        )
 
-        # Update the 'per_obsid' table
-        if rows_obsid:
-            sort_cols = ["mean_date"]
-            update_data_table(rows_obsid, dat_obsid_old, obsid_metrics_file, sort_cols)
+        if not metrics_obsid["dwell"]:
+            logger.info(f"Skipping obsid {obsid}: not a dwell?")
+            info = "Not a dwell"
+            make_special_case_html(metrics_obsid, obs_dir, info=info)
+            return
 
-        # Update the 'per_slot' table
-        if rows_slots:
-            sort_cols = ["mean_date", "slot"]
-            update_data_table(rows_slots, dat_slot_old, slot_metrics_file, sort_cols)
+        if metrics_obsid["att_flag"] > 1:
+            logger.info(f"Skipping obsid {obsid}: problem matching obc/ground times")
+            info = "Problem matching obc/ground att times"
+            make_special_case_html(metrics_obsid, obs_dir, info=info)
+            return
+
+        if obsid < 40000 and metrics_obsid["att_flag"] == 1:
+            logger.info(f"Skipping science obsid {obsid}: no ground aspect solution")
+            info = "No ground aspect solution for science obsid"
+            make_special_case_html(metrics_obsid, obs_dir, info=info)
+            return
+
+        if make_plots:
+            plot_observed_metrics(
+                obsid,
+                plot_dir=obs_dir,
+                coord="dr",
+                att_errors=metrics_obsid["att_errors"],
+                save=save,
+            )
+    except (NoObsidError, NoDwellError, NoManvrError) as err:
+        logger.info(f"Skipping obsid {obsid} missing data: {err}")
+        return
+    except Exception as err:
+        logger.warning(f"Skipping obsid {obsid} ERROR: {err}")
+        raise
+
+    # Process entries for 'per obsid' metrics
+
+    keys_obsid = (
+        "obsid",
+        "mean_date",
+        "att_flag",
+        "dr50",
+        "dr95",
+        "aber_y",
+        "aber_z",
+        "aber_flag",
+        "one_shot_pitch",
+        "one_shot_yaw",
+        "one_shot",
+        "one_shot_aber_corrected",
+        "manvr_angle",
+        "preceding_roll_err",
+        "ending_roll_err",
+        "obsid_preceding",
+        "obsid_next",
+    )
+
+    row_obsid = {k: metrics_obsid[k] for k in keys_obsid}
+    rows_obsid.append(row_obsid)
+
+    # Process entries for 'per slot' metrics
+    row_slots = []
+    for slot in range(8):
+        out = {}
+        slot_data = metrics_slot["slots"][slot]
+        if bool(slot_data):
+            out["obsid"] = obsid
+            out["slot"] = slot
+            out["mean_date"] = metrics_obsid["mean_date"]
+            keys_slot = (
+                "id",
+                "type",
+                "mag",
+                "yang",
+                "zang",
+                "median_mag",
+                "median_dy",
+                "median_dz",
+            )
+            out.update({k: slot_data[k] for k in keys_slot})
+            # Needed to build html
+            row_slots.append(out)
+            # Needed to update 'per slot' data file
+            rows_slots.append(out)
+
+    # Build html page for this obsid
+    make_html(row_obsid, row_slots, obs_dir)
+
+    # Update the 'per_obsid' table
+    if rows_obsid:
+        sort_cols = ["mean_date"]
+        update_data_table(rows_obsid, dat_obsid_old, obsid_metrics_file, sort_cols)
+
+    # Update the 'per_slot' table
+    if rows_slots:
+        sort_cols = ["mean_date", "slot"]
+        update_data_table(rows_slots, dat_slot_old, slot_metrics_file, sort_cols)
 
 
 def update_data_table(rows, dat_old, metrics_file, sort_cols):
@@ -1140,7 +1173,7 @@ button {{
                 <h2>Performance Details</h2>
 
                 <pre>
-OBSID <a href="{MICA_PORTAL}{obsid}">{obsid}</a>         Mean date: {DateTime(mean_date).caldate}
+OBSID <a href="{MICA_PORTAL}{obsid}">{obsid}</a>         Mean date: {CxoTime(mean_date).iso}
 
   One shot Pitch: {one_shot_pitch:7.2f} arcsec    Aber-y = {aber_y:6.2f} arcsec
   One shot Yaw:   {one_shot_yaw:7.2f} arcsec    Aber-z = {aber_z:6.2f} arcsec
