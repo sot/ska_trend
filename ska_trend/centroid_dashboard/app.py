@@ -6,7 +6,7 @@ import astropy.units as u
 import kadi.commands as kc
 import kadi.events as ke
 import razl.observations
-from cxotime import CxoTime  # , CxoTimeDescriptor
+from cxotime import CxoTime, CxoTimeLike  # , CxoTimeDescriptor
 from ska_helpers.logging import basic_logger
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
@@ -94,7 +94,31 @@ class Observation(razl.observations.Observation):
         return out
 
 
-def get_observations(start: CxoTime, stop: CxoTime):
+def get_observations(start: CxoTimeLike, stop: CxoTimeLike):
+    """
+    Get observations between the specified start and stop times.
+
+    This function uses the kadi get_cmds() to retrieve commands and the `razl` module to
+    convert those commands into observations. It also logs information about each
+    observation found.
+
+    Parameters
+    ----------
+    start : CxoTimeLike
+        The start time for the observation retrieval.
+    stop : CxoTimeLike
+        The stop time for the observation retrieval.
+
+    Returns
+    -------
+    list of Observation
+        A list of Observation objects found between the specified start and stop times.
+    """
+    start = CxoTime(start)
+    stop = CxoTime(stop)
+
+    # Get planned commands as if no SCS-107 events occurred. This gives the planned
+    # obsids and other observation information from commands.
     lookback_days = (stop - start + 14 * u.day).to_value(u.day)
     with kc.set_time_now(stop), kc.conf.set_temp("default_lookback", lookback_days):
         cmds = kc.get_cmds(start, stop, event_filter=kc.filter_scs107_events)
@@ -107,6 +131,7 @@ def get_observations(start: CxoTime, stop: CxoTime):
 
     obss = []
     for obs_razl in obss_razl:
+        # Create local Observation object from razl Observation object
         kwargs = {
             k: getattr(obs_razl, k)
             for k in razl.observations.Observation.__annotations__
