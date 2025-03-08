@@ -1,0 +1,164 @@
+<html>
+
+<head>
+    <title>Obsid {{obsid}}</title>
+
+    <script type="text/javascript" src="/aspect/overlib.js"></script>
+    <style type="text/css">
+        body {
+            min-width: 900px;
+            margin-left: 20px;
+            background-color: lightblue;
+        }
+
+        div#fullwidth {
+            clear: both;
+            position: static;
+            width: 1200px;
+            left: 0px;
+        }
+
+        div#leftmain {
+            float: left;
+            width: 520px;
+            left: 0px;
+            top: 0px;
+        }
+
+        div#leftsmall {
+            float: left;
+            width: 500px;
+        }
+
+        div.border {
+            background-color: white;
+            padding-left: 10px;
+            padding-bottom: 5px;
+            border-style: solid;
+            border-width: 5px;
+            border-radius: 20px;
+        }
+
+        div#rightlarge {
+            float: right;
+            width: 415px;
+        }
+
+        div#rightsmall {
+            float: right;
+            width: 635px;
+            left: 650px;
+            top: 0px;
+            padding-right: 5px;
+        }
+
+        button {
+            background: none !important;
+            border: none;
+            padding: 0 !important;
+            color: #069;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="fullwidth">
+
+        <div id="leftmain">
+
+            <div class="border" style="padding: 10px; margin-bottom: .5cm">
+                <span id="label" style="font-size:150%; font-weight:bold;">
+                    {{preceding_obsid_link}}
+                    -- Obsid {{obsid}} --
+                    {{next_obsid_link}}
+                </span>
+            </div>
+
+            <div class="border" style="float: left; margin-bottom: .5cm;">
+
+                <div id="leftsmall">
+                    <h2>Performance Details</h2>
+
+                    <pre>
+OBSID <a href="{{MICA_PORTAL}}{{obsid}}">{{obsid}}</a>         Mean date: {{CxoTime(mean_date).iso}}
+
+  One shot Pitch: {{"{7.2f}".format(one_shot_pitch)}} arcsec    Aber-y = {{aber_y:6.2f}} arcsec
+  One shot Yaw:   {{one_shot_yaw:7.2f}} arcsec    Aber-z = {{aber_z:6.2f}} arcsec
+  One shot = {{one_shot:.2f}} arcsec
+  One shot with aberration correction = {{one_shot_aber_corrected:.2f}} arcsec
+  Manvr angle = {{manvr_angle:.2f}} deg
+
+  dr50 = {{dr50:.2f}} arcsec
+  dr95 = {{dr95:.2f}} arcsec
+
+  Ending roll err = {{ending_roll_err:.2f}} arcsec
+
+Preceding Observation
+
+  OBSID <a href="{{MICA_PORTAL}}{{obsid_preceding}}">{{obsid_preceding}}</a>
+  Ending roll error = {{preceding_roll_err:.2f}} arcsec
+
+Next Observation
+
+  OBSID <a href="{{MICA_PORTAL}}{{obsid_next}}">{{obsid_next}}</a>
+                </pre>
+                </div>
+            </div>
+
+            <div class="border" style="float: left; margin-bottom: .5cm;">
+                <div id="leftsmall">
+                    <h2>Catalog and visualization of centroid residuals</h2>
+                    <table border=1 style="font-size:11px" align="center">
+                        <tr>
+                            <th align='right'>SLOT</th>
+                            <th align='right'>ID</th>
+                            <th align='right'>TYPE</th>
+                            <th align='right'>MAG</th>
+                            <th align='right'>YANG</th>
+                            <th align='right'>ZANG</th>
+                            <th align='right'>MEDIAN MAG</th>
+                            <th align='right'>MEDIAN DY</th>
+                            <th align='right'>MEDIAN DZ</th>
+                        </tr>
+                        <tr>
+                            {% for row in starcat %}
+                            <td align='right'>{row["slot"]}</td>
+                            <td align='right'>{row["id"]}</td>
+                            <td align='right'>{row["type"]}</td>
+                            <td align='right'>{row["mag"]}</td>
+                            <td align='right'>{row["yang"]}</td>
+                            <td align='right'>{row["zang"]}</td>
+                            <td align='right'>{row["median_mag"]:.3f}</td>
+                            <td align='right'>{row["median_dy"]:.2f}</td>
+                            <td align='right'>{row["median_dz"]:.2f}</td>
+                            {% endfor %}
+                        </tr>
+                    </table>
+
+                    <img src="crs_vis_{obsid}.png" width="490" height="490">
+                </div>
+            </div>
+
+        </div>
+
+        <div id="rightsmall" class="border"
+            style="padding-top: 10px; margin-bottom: .5cm">
+            <img src="observed_drs_{obsid}.png" width="635" height="198">
+        </div>
+        <div id="rightsmall" class="border"
+            style="padding-top: 10px; margin-bottom: .5cm">
+            <img src="crs_time_{obsid}.png" width="635" height="556">
+        </div>
+        <div id="rightsmall" class="border"
+            style="padding-top: 10px; margin-bottom: .5cm">
+            <img src="n_kalman_{obsid}.png" width="635" height="198">
+        </div>
+
+    </div>
+
+</body>
+
+</html>
