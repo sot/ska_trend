@@ -1,12 +1,14 @@
 import argparse
 import functools
 from dataclasses import dataclass
+from pathlib import Path
 
 import astropy.units as u
 import kadi.commands as kc
 import kadi.events as ke
 import razl.observations
 from cxotime import CxoTime, CxoTimeLike  # , CxoTimeDescriptor
+from jinja2 import Template
 from ska_helpers.logging import basic_logger
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
@@ -40,6 +42,10 @@ NDAYS_DEFAULT = 7
 logger = basic_logger("centroid_dashboard")
 
 
+def index_html_path(obs, opt):
+    return Path(opt.data_root) / "reports" / str(obs.obsid) / "index.html"
+
+
 def get_opt():
     parser = argparse.ArgumentParser(description="Centroid dashboard")
     parser.add_argument("--obsid", help="Processing obsid (default=None)")
@@ -68,6 +74,12 @@ def get_opt():
     return parser
 
 
+@functools.lru_cache()
+def get_index_template():
+    path = Path(__file__).parent / "index_template.html"
+    return path.read_text()
+
+
 @dataclass(repr=False, kw_only=True)
 class Observation(razl.observations.Observation):
     @functools.cached_property
@@ -92,6 +104,66 @@ class Observation(razl.observations.Observation):
             # the high-IR zone dwell are common cases of 2 manvrs.
             out = manvrs[len(manvrs) - 1]  # Negative indexing not supported
         return out
+
+    @functools.cached_property
+    def aber_y(self):
+        return 0.0
+
+    @functools.cached_property
+    def aber_z(self):
+        return 0.0
+
+    @functools.cached_property
+    def date(self):
+        return 0.0
+
+    @functools.cached_property
+    def next_obsid_link(self):
+        return 0.0
+
+    @functools.cached_property
+    def obsid(self):
+        return 0.0
+
+    @functools.cached_property
+    def one_shot(self):
+        return 0.0
+
+    @functools.cached_property
+    def one_shot_aber_corrected(self):
+        return 0.0
+
+    @functools.cached_property
+    def one_shot_pitch(self):
+        return 0.0
+
+    @functools.cached_property
+    def one_shot_yaw(self):
+        return 0.0
+
+    @functools.cached_property
+    def preceding_obsid_link(self):
+        return 0.0
+
+    @functools.cached_property
+    def obsid_next(self):
+        return 0.0
+
+    @functools.cached_property
+    def obsid_prev(self):
+        return 0.0
+
+    @functools.cached_property
+    def starcat_summary(self):
+        summary = self.starcat.copy()
+        summary["median_mag"] = 0.0
+        summary["median_dy"] = 0.0
+        summary["median_dz"] = 0.0
+        return summary
+
+    def __getattr__(self, name):
+        print(name)
+        return 0.0
 
 
 def get_observations(start: CxoTimeLike, stop: CxoTimeLike):
@@ -145,6 +217,62 @@ def get_observations(start: CxoTimeLike, stop: CxoTimeLike):
     return obss
 
 
+def make_html(obs: Observation, opt: argparse.Namespace):
+    """Make the HTML file for the observation.
+
+    It includes the following Jinja variable references:
+    - aber_y
+    - aber_z
+    - dr50
+    - dr95
+    - ending_roll_err
+    - manvr_angle
+    - mean_date
+    - MICA_PORTAL
+    - next_obsid_link
+    - obsid
+    - obsid_next
+    - obsid_preceding
+    - one_shot
+    - one_shot_aber_corrected
+    - one_shot_pitch
+    - one_shot_yaw
+    - preceding_obsid_link
+    - preceding_roll_err
+    - starcat
+    """
+    logger.info(f"Making HTML for observation {obs.obsid}")
+    # Get the template from index_template.html
+    template = Template(get_index_template())
+    context = {
+        "MICA_PORTAL": "https://icxc.harvard.edu/mica",
+        "aber_y": obs.aber_y,
+        "aber_z": obs.aber_z,
+        "dr50": obs.droll_50,
+        "dr95": obs.droll_95,
+        "ending_roll_err": obs.ending,
+        "manvr_angle": obs.manvr_angle,
+        "mean_date": obs.date,
+        "next_obsid_link": obs.obsid_next,
+        "obsid": obs.obsid,
+        "obsid_next": obs.obsid_next,
+        "obsid_preceding": obs.obsid_prev,
+        "one_shot": obs.one_shot,
+        "one_shot_aber_corrected": obs.one_shot_aber_corrected,
+        "one_shot_pitch": obs.one_shot_pitch,
+        "one_shot_yaw": obs.one_shot_yaw,
+        "preceding_obsid_link": obs.obsid_prev,
+        "preceding_roll_err": obs.preceding,
+        "starcat": obs.starcat_summary,
+    }
+
+    html = template.render(**context)
+    path = index_html_path(obs, opt)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Writing {path}")
+    path.write_text(html)
+
+
 def main(args=None):
     opt = get_opt().parse_args(args)
     logger.setLevel(opt.log_level)
@@ -155,6 +283,9 @@ def main(args=None):
 
     obss = get_observations(start, stop)
     logger.info(f"Found {len(obss)} observations")
+    for obs in obss:
+        logger.info(f"Processing observation {obs.obsid}")
+        make_html(obs, opt)
 
 
 if __name__ == "__main__":

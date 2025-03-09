@@ -1,5 +1,28 @@
 <html>
 
+<!--
+    This template file is used to render the centroid dashboard index page.
+    It includes the following Jinja variable references:
+    - obsid
+    - preceding_obsid_link
+    - next_obsid_link
+    - MICA_PORTAL
+    - mean_date
+    - one_shot_pitch
+    - aber_y
+    - one_shot_yaw
+    - aber_z
+    - one_shot
+    - one_shot_aber_corrected
+    - manvr_angle
+    - dr50
+    - dr95
+    - ending_roll_err
+    - obsid_preceding
+    - preceding_roll_err
+    - obsid_next
+    - starcat
+-->
 <head>
     <title>Obsid {{obsid}}</title>
 
@@ -83,23 +106,23 @@
                     <h2>Performance Details</h2>
 
                     <pre>
-OBSID <a href="{{MICA_PORTAL}}{{obsid}}">{{obsid}}</a>         Mean date: {{CxoTime(mean_date).iso}}
+OBSID <a href="{{MICA_PORTAL}}{{obsid}}">{{obsid}}</a>         Mean date: {{date}}
 
-  One shot Pitch: {{"{7.2f".format(one_shot_pitch)}} arcsec    Aber-y = {{"{6.2f".format(aber_y)}} arcsec
-  One shot Yaw:   {{"{7.2f".format(one_shot_yaw)}} arcsec    Aber-z = {{"{6.2f".format(aber_z)}} arcsec
-  One shot = {{"{.2f".format(one_shot)}} arcsec
-  One shot with aberration correction = {{"{.2f".format(one_shot_aber_corrected)}} arcsec
-  Manvr angle = {{"{.2f".format(manvr_angle)}} deg
+  One shot Pitch: {{"{:7.2f}".format(one_shot_pitch)}} arcsec    Aber-y = {{"{:6.2f}".format(aber_y)}} arcsec
+  One shot Yaw:   {{"{:7.2f}".format(one_shot_yaw)}} arcsec    Aber-z = {{"{:6.2f}".format(aber_z)}} arcsec
+  One shot = {{"{:.2f}".format(one_shot)}} arcsec
+  One shot with aberration correction = {{"{:.2f}".format(one_shot_aber_corrected)}} arcsec
+  Manvr angle = {{"{:.2f}".format(manvr_angle)}} deg
 
-  dr50 = {{"{.2f".format(dr50)}} arcsec
-  dr95 = {{"{.2f".format(dr95)}} arcsec
+  dr50 = {{"{:.2f}".format(dr50)}} arcsec
+  dr95 = {{"{:.2f}".format(dr95)}} arcsec
 
-  Ending roll err = {{"{.2f".format(ending_roll_err)}} arcsec
+  Ending roll err = {{"{:.2f}".format(ending_roll_err)}} arcsec
 
 Preceding Observation
 
   OBSID <a href="{{MICA_PORTAL}}{{obsid_preceding}}">{{obsid_preceding}}</a>
-  Ending roll error = {{"{.2f".format(preceding_roll_err)}} arcsec
+  Ending roll error = {{"{:.2f}".format(preceding_roll_err)}} arcsec
 
 Next Observation
 
@@ -125,15 +148,15 @@ Next Observation
                         </tr>
                         <tr>
                             {% for row in starcat %}
-                            <td align='right'>{row["slot"]}</td>
-                            <td align='right'>{row["id"]}</td>
-                            <td align='right'>{row["type"]}</td>
-                            <td align='right'>{row["mag"]}</td>
-                            <td align='right'>{row["yang"]}</td>
-                            <td align='right'>{row["zang"]}</td>
-                            <td align='right'>{{"{:.3f".format(row["median_mag"])}}</td>
-                            <td align='right'>{{"{:.2f".format(row["median_dy"])}}</td>
-                            <td align='right'>{{"{:.2f".format(row["median_dz"])}}</td>
+                            <td align='right'>{{row["slot"]}}</td>
+                            <td align='right'>{{row["id"]}}</td>
+                            <td align='right'>{{row["type"]}}</td>
+                            <td align='right'>{{row["mag"]}}</td>
+                            <td align='right'>{{row["yang"]}}</td>
+                            <td align='right'>{{row["zang"]}}</td>
+                            <td align='right'>{{"{:.3f}".format(row["median_mag"])}}</td>
+                            <td align='right'>{{"{:.2f}".format(row["median_dy"])}}</td>
+                            <td align='right'>{{"{:.2f}".format(row["median_dz"])}}</td>
                             {% endfor %}
                         </tr>
                     </table>
