@@ -27,9 +27,9 @@ NDAYS_DEFAULT = 7
 # one_shot_pitch: float
 # one_shot_yaw: float
 # manvr_angle: float
-# obsid_preceding: int
-# ending_roll_err: float
-# preceding_roll_err: float
+# obsid_prev: int
+# roll_err_ending: float
+# roll_err_prev: float
 # aber_y: float
 # aber_z: float
 # aber_flag: int
@@ -82,6 +82,12 @@ def get_index_template():
 
 @dataclass(repr=False, kw_only=True)
 class Observation(razl.observations.Observation):
+    obsid_next: int | None = -9999
+    obsid_prev: int | None = -9999
+
+    def processed(self):
+        return False
+
     @functools.cached_property
     def manvr_event(self):
         """Provide the maneuver event leading to this observation."""
@@ -118,8 +124,34 @@ class Observation(razl.observations.Observation):
         return 0.0
 
     @functools.cached_property
-    def next_obsid_link(self):
-        return 0.0
+    def context(self):
+        context = {"MICA_PORTAL": "https://icxc.harvard.edu/mica"}
+        attributes = [
+            "aber_y",
+            "aber_z",
+            "dr50",
+            "dr95",
+            "manvr_angle",
+            "mean_date",
+            "obsid",
+            "obsid_next",
+            "obsid_next_url",
+            "obsid_prev",
+            "obsid_prev_url",
+            "one_shot",
+            "one_shot_aber_corrected",
+            "one_shot_pitch",
+            "one_shot_yaw",
+            "roll_err_ending",
+            "roll_err_prev",
+            "starcat_summary",
+        ]
+        context.update({attr: getattr(self, attr) for attr in attributes})
+        return context
+
+    @functools.cached_property
+    def obsid_next_url(self):
+        return f"../{self.obsid_next}/index.html"
 
     @functools.cached_property
     def obsid(self):
@@ -142,16 +174,8 @@ class Observation(razl.observations.Observation):
         return 0.0
 
     @functools.cached_property
-    def preceding_obsid_link(self):
-        return 0.0
-
-    @functools.cached_property
-    def obsid_next(self):
-        return 0.0
-
-    @functools.cached_property
-    def obsid_prev(self):
-        return 0.0
+    def obsid_prev_url(self):
+        return f"../{self.obsid_prev}/index.html"
 
     @functools.cached_property
     def starcat_summary(self):
@@ -166,7 +190,7 @@ class Observation(razl.observations.Observation):
         return 0.0
 
 
-def get_observations(start: CxoTimeLike, stop: CxoTimeLike):
+def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]:
     """
     Get observations between the specified start and stop times.
 
@@ -225,48 +249,27 @@ def make_html(obs: Observation, opt: argparse.Namespace):
     - aber_z
     - dr50
     - dr95
-    - ending_roll_err
+    - roll_err_ending
     - manvr_angle
     - mean_date
     - MICA_PORTAL
-    - next_obsid_link
+    - obsid_next_url
     - obsid
     - obsid_next
-    - obsid_preceding
+    - obsid_prev
     - one_shot
     - one_shot_aber_corrected
     - one_shot_pitch
     - one_shot_yaw
-    - preceding_obsid_link
-    - preceding_roll_err
+    - obsid_prev_url
+    - roll_err_prev
     - starcat
     """
     logger.info(f"Making HTML for observation {obs.obsid}")
     # Get the template from index_template.html
     template = Template(get_index_template())
-    context = {
-        "MICA_PORTAL": "https://icxc.harvard.edu/mica",
-        "aber_y": obs.aber_y,
-        "aber_z": obs.aber_z,
-        "dr50": obs.droll_50,
-        "dr95": obs.droll_95,
-        "ending_roll_err": obs.ending,
-        "manvr_angle": obs.manvr_angle,
-        "mean_date": obs.date,
-        "next_obsid_link": obs.obsid_next,
-        "obsid": obs.obsid,
-        "obsid_next": obs.obsid_next,
-        "obsid_preceding": obs.obsid_prev,
-        "one_shot": obs.one_shot,
-        "one_shot_aber_corrected": obs.one_shot_aber_corrected,
-        "one_shot_pitch": obs.one_shot_pitch,
-        "one_shot_yaw": obs.one_shot_yaw,
-        "preceding_obsid_link": obs.obsid_prev,
-        "preceding_roll_err": obs.preceding,
-        "starcat": obs.starcat_summary,
-    }
 
-    html = template.render(**context)
+    html = template.render(**obs.context)
     path = index_html_path(obs, opt)
     path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Writing {path}")
@@ -283,7 +286,20 @@ def main(args=None):
 
     obss = get_observations(start, stop)
     logger.info(f"Found {len(obss)} observations")
-    for obs in obss:
+
+    for idx, obs in enumerate(obss):
+        obs_prev = obss[idx - 1] if idx > 0 else None
+        obs_next = obss[idx + 1] if idx < len(obss) - 1 else None
+        if obs_next is not None:
+            obs.obsid_next = obs_next.obsid
+        if obs_prev is not None:
+            obs.obsid_prev = obs_prev.obsid
+
+        if obs.processed():
+            logger.info(f"Skipping processed observation {obs.obsid}")
+            continue
+        # if obs_prev is None:
+        #     obs_prev = Observation.from_json()
         logger.info(f"Processing observation {obs.obsid}")
         make_html(obs, opt)
 

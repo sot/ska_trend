@@ -4,8 +4,8 @@
     This template file is used to render the centroid dashboard index page.
     It includes the following Jinja variable references:
     - obsid
-    - preceding_obsid_link
-    - next_obsid_link
+    - obsid_prev_url
+    - obsid_next_url
     - MICA_PORTAL
     - mean_date
     - one_shot_pitch
@@ -17,9 +17,9 @@
     - manvr_angle
     - dr50
     - dr95
-    - ending_roll_err
-    - obsid_preceding
-    - preceding_roll_err
+    - roll_err_ending
+    - obsid_prev
+    - roll_err_prev
     - obsid_next
     - starcat
 -->
@@ -94,9 +94,9 @@
 
             <div class="border" style="padding: 10px; margin-bottom: .5cm">
                 <span id="label" style="font-size:150%; font-weight:bold;">
-                    {{preceding_obsid_link}}
+                    <a href="{{obsid_prev_url}}">{{obsid_prev}}</a> --
                     -- Obsid {{obsid}} --
-                    {{next_obsid_link}}
+                    <a href="{{obsid_next_url}}">{{obsid_next}}</a>
                 </span>
             </div>
 
@@ -117,12 +117,12 @@ OBSID <a href="{{MICA_PORTAL}}{{obsid}}">{{obsid}}</a>         Mean date: {{date
   dr50 = {{"{:.2f}".format(dr50)}} arcsec
   dr95 = {{"{:.2f}".format(dr95)}} arcsec
 
-  Ending roll err = {{"{:.2f}".format(ending_roll_err)}} arcsec
+  Ending roll err = {{"{:.2f}".format(roll_err_ending)}} arcsec
 
 Preceding Observation
 
-  OBSID <a href="{{MICA_PORTAL}}{{obsid_preceding}}">{{obsid_preceding}}</a>
-  Ending roll error = {{"{:.2f}".format(preceding_roll_err)}} arcsec
+  OBSID <a href="{{MICA_PORTAL}}{{obsid_prev}}">{{obsid_prev}}</a>
+  Ending roll error = {{"{:.2f}".format(roll_err_prev)}} arcsec
 
 Next Observation
 
