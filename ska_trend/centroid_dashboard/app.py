@@ -14,6 +14,8 @@ from jinja2 import Template
 from ska_helpers.logging import basic_logger
 from starcheck.state_checks import calc_man_angle_for_duration
 
+from . import paths
+
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
 NDAYS_DEFAULT = 7
 
@@ -43,10 +45,6 @@ NDAYS_DEFAULT = 7
 # dwell: bool
 
 logger = basic_logger("centroid_dashboard")
-
-
-def index_html_path(obs, opt):
-    return Path(opt.data_root) / "reports" / str(obs.obsid) / "index.html"
 
 
 def get_opt():
@@ -90,6 +88,10 @@ class Observation(razl.observations.Observation):
 
     def processed(self):
         return False
+
+    @staticmethod
+    def report_subdir(obsid) -> str:
+        return paths.report_subdir(obsid)
 
     @functools.cached_property
     def manvr_event(self):
@@ -283,10 +285,21 @@ def make_html(obs: Observation, opt: argparse.Namespace):
     template = Template(get_index_template())
 
     html = template.render(**obs.context)
-    path = index_html_path(obs, opt)
+    path = paths.index_html(obs.obsid, opt.data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Writing {path}")
     path.write_text(html)
+
+
+def process_obs(obs, opt):
+    if obs.manvr_event is None:
+        logger.info(f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping")
+        return
+
+    if not opt.force and paths.info_json(obs.obsid, opt.data_root).exists():
+        return
+
+    make_html(obs, opt)
 
 
 def main(args=None):
@@ -301,20 +314,11 @@ def main(args=None):
     logger.info(f"Found {len(obss)} observations")
 
     for idx, obs in enumerate(obss):
-        obs_prev = obss[idx - 1] if idx > 0 else None
-        obs_next = obss[idx + 1] if idx < len(obss) - 1 else None
-        if obs_next is not None:
-            obs.obs_next = obs_next
-        if obs_prev is not None:
-            obs.obs_prev = obs_prev
+        obs.obs_prev = obss[idx - 1] if idx > 0 else None
+        obs.obs_next = obss[idx + 1] if idx < len(obss) - 1 else None
 
-        if obs.processed():
-            logger.info(f"Skipping processed observation {obs.obsid}")
-            continue
-        # if obs_prev is None:
-        #     obs_prev = Observation.from_json()
         logger.info(f"Processing observation {obs.obsid}")
-        make_html(obs, opt)
+        process_obs(obs, opt)
 
 
 if __name__ == "__main__":
