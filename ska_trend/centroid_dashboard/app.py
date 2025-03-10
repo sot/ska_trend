@@ -2,14 +2,17 @@ import argparse
 import functools
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import astropy.units as u
 import kadi.commands as kc
 import kadi.events as ke
+import numpy as np
 import razl.observations
 from cxotime import CxoTime, CxoTimeLike  # , CxoTimeDescriptor
 from jinja2 import Template
 from ska_helpers.logging import basic_logger
+from starcheck.state_checks import calc_man_angle_for_duration
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
 NDAYS_DEFAULT = 7
@@ -82,8 +85,8 @@ def get_index_template():
 
 @dataclass(repr=False, kw_only=True)
 class Observation(razl.observations.Observation):
-    obsid_next: int | None = -9999
-    obsid_prev: int | None = -9999
+    obs_next: Optional["Observation"] = None
+    obs_prev: Optional["Observation"] = None
 
     def processed(self):
         return False
@@ -112,70 +115,84 @@ class Observation(razl.observations.Observation):
         return out
 
     @functools.cached_property
-    def aber_y(self):
+    def aber_y(self) -> float:
         return 0.0
 
     @functools.cached_property
-    def aber_z(self):
+    def aber_z(self) -> float:
         return 0.0
 
     @functools.cached_property
-    def date(self):
-        return 0.0
+    def date(self) -> str:
+        return self.manvr_event.kalman_start
 
     @functools.cached_property
     def context(self):
-        context = {"MICA_PORTAL": "https://icxc.harvard.edu/mica"}
-        attributes = [
-            "aber_y",
-            "aber_z",
-            "dr50",
-            "dr95",
-            "manvr_angle",
-            "mean_date",
-            "obsid",
-            "obsid_next",
-            "obsid_next_url",
-            "obsid_prev",
-            "obsid_prev_url",
-            "one_shot",
-            "one_shot_aber_corrected",
-            "one_shot_pitch",
-            "one_shot_yaw",
-            "roll_err_ending",
-            "roll_err_prev",
-            "starcat_summary",
-        ]
-        context.update({attr: getattr(self, attr) for attr in attributes})
+        context = {"MICA_PORTAL": "https://icxc.harvard.edu/mica", "obs": self}
         return context
-
-    @functools.cached_property
-    def obsid_next_url(self):
-        return f"../{self.obsid_next}/index.html"
-
-    @functools.cached_property
-    def obsid(self):
-        return 0.0
-
-    @functools.cached_property
-    def one_shot(self):
-        return 0.0
 
     @functools.cached_property
     def one_shot_aber_corrected(self):
         return 0.0
 
     @functools.cached_property
+    def one_shot(self):
+        return self.manvr_event.one_shot
+
+    @functools.cached_property
     def one_shot_pitch(self):
-        return 0.0
+        return self.manvr_event.one_shot_pitch
 
     @functools.cached_property
     def one_shot_yaw(self):
+        return self.manvr_event.one_shot_yaw
+
+    @functools.cached_property
+    def manvr_angles(self):
+        angles = []
+        for manvr in self.manvrs:
+            dq = manvr.att_stop.dq(manvr.att_start)
+            angles.append(np.rad2deg(np.arccos(dq.q[3]) * 2))
+        return angles
+
+    @functools.cached_property
+    def manvr_angles_text(self):
+        if len(self.manvr_angles) == 1:
+            out = ""
+        else:
+            angles = " + ".join([f"{angle:.1f}" for angle in self.manvr_angles])
+            out = f" Segmented: {angles} deg"
+        return out
+
+    @functools.cached_property
+    def manvr_angle(self):
+        if (n_manvrs := len(self.manvr_angles)) == 1:
+            manvr = self.manvrs[0]
+            dq = manvr.att_stop.dq(manvr.att_start)
+            angle = np.rad2deg(np.arccos(dq.q[3]) * 2)
+        elif n_manvrs > 1:
+            duration = self.manvrs[-1].stop.secs - self.manvrs[0].start.secs
+            angle = calc_man_angle_for_duration(duration)
+        else:
+            angle = -999.0
+            logger.warning(f"Observation {self.obsid} has no maneuvers")
+        return angle
+
+    @functools.cached_property
+    def dr50(self):
         return 0.0
 
     @functools.cached_property
-    def obsid_prev_url(self):
-        return f"../{self.obsid_prev}/index.html"
+    def dr95(self):
+        return 0.0
+
+    @functools.cached_property
+    def roll_err_ending(self):
+        return 0.0
+
+    @functools.cached_property
+    def roll_err_prev(self):
+        return 0.0
 
     @functools.cached_property
     def starcat_summary(self):
@@ -184,10 +201,6 @@ class Observation(razl.observations.Observation):
         summary["median_dy"] = 0.0
         summary["median_dz"] = 0.0
         return summary
-
-    def __getattr__(self, name):
-        print(name)
-        return 0.0
 
 
 def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]:
@@ -291,9 +304,9 @@ def main(args=None):
         obs_prev = obss[idx - 1] if idx > 0 else None
         obs_next = obss[idx + 1] if idx < len(obss) - 1 else None
         if obs_next is not None:
-            obs.obsid_next = obs_next.obsid
+            obs.obs_next = obs_next
         if obs_prev is not None:
-            obs.obsid_prev = obs_prev.obsid
+            obs.obs_prev = obs_prev
 
         if obs.processed():
             logger.info(f"Skipping processed observation {obs.obsid}")
