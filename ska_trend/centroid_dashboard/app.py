@@ -1,5 +1,6 @@
 import argparse
 import functools
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -8,6 +9,7 @@ import astropy.units as u
 import kadi.commands as kc
 import kadi.events as ke
 import numpy as np
+import parse_cm.paths
 import razl.observations
 from cxotime import CxoTime, CxoTimeLike  # , CxoTimeDescriptor
 from jinja2 import Template
@@ -18,31 +20,6 @@ from . import paths
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
 NDAYS_DEFAULT = 7
-
-
-# @dataclass
-# class Observation:
-#     obsid: int  # Obsid planned (from schedule)
-#     obsid_tlm: int  # Obsid from telemetry
-#     starcat_date: CxoTimeDescriptor | None = CxoTimeDescriptor()
-
-# droll_50: float | None = None
-# droll_95: float | None = None
-# one_shot: float
-# one_shot_pitch: float
-# one_shot_yaw: float
-# manvr_angle: float
-# obsid_prev: int
-# roll_err_ending: float
-# roll_err_prev: float
-# aber_y: float
-# aber_z: float
-# aber_flag: int
-# one_shot_aber_corrected: float
-# obsid_next: int
-# att_errors: dict
-# att_flag: int
-# dwell: bool
 
 logger = basic_logger("centroid_dashboard")
 
@@ -86,12 +63,21 @@ class Observation(razl.observations.Observation):
     obs_next: Optional["Observation"] = None
     obs_prev: Optional["Observation"] = None
 
-    def processed(self):
-        return False
+    def processed(self, info_json_path: Path):
+        """Check if the observation has already been processed.
 
-    @staticmethod
-    def report_subdir(obsid) -> str:
-        return paths.report_subdir(obsid)
+        The check is based on the existence of the info.json file and the non-None
+        values obsid_next and obsid_prev keys in the file.
+        """
+        if not info_json_path.exists():
+            return False
+        info = json.loads(info_json_path.read_text())
+        return info["obsid_next"] is not None and info["obsid_prev"] is not None
+
+    @functools.cached_property
+    def report_subdir(self):
+        year = parse_cm.paths.parse_load_name(self.source)[-1]
+        return Path(str(year), self.source, f"{self.obsid:05d}")
 
     @functools.cached_property
     def manvr_event(self):
@@ -126,12 +112,38 @@ class Observation(razl.observations.Observation):
 
     @functools.cached_property
     def date(self) -> str:
+        """Date of start of KALMAN from telemetry.
+
+        TODO: change name to date_kalman_start?
+        """
         return self.manvr_event.kalman_start
 
     @functools.cached_property
-    def context(self):
-        context = {"MICA_PORTAL": "https://icxc.harvard.edu/mica", "obs": self}
-        return context
+    def info(self) -> str:
+        attrs = [
+            "obsid",
+            "aber_y",
+            "aber_z",
+            "date_starcat",
+            "date",
+            "manvr_angle",
+            "obsid_next",
+            "obsid_prev",
+            "one_shot",
+            "one_shot_aber_corrected",
+            "one_shot_pitch",
+            "one_shot_yaw",
+            "roll_err_ending",
+            "roll_err_prev",
+        ]
+        out = {}
+        for attr in attrs:
+            val = getattr(self, attr)
+            if isinstance(val, float):
+                val = round(val, 3)
+            out[attr] = val
+
+        return out
 
     @functools.cached_property
     def one_shot_aber_corrected(self):
@@ -181,6 +193,14 @@ class Observation(razl.observations.Observation):
         return angle
 
     @functools.cached_property
+    def obsid_next(self):
+        return self.obs_next.obsid if self.obs_next else None
+
+    @functools.cached_property
+    def obsid_prev(self):
+        return self.obs_prev.obsid if self.obs_prev else None
+
+    @functools.cached_property
     def dr50(self):
         return 0.0
 
@@ -195,6 +215,11 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def roll_err_prev(self):
         return 0.0
+
+    @functools.cached_property
+    def date_starcat(self):
+        """Date of MP_STARCAT command"""
+        return self.starcat.date
 
     @functools.cached_property
     def starcat_summary(self):
@@ -257,49 +282,37 @@ def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]
 
 
 def make_html(obs: Observation, opt: argparse.Namespace):
-    """Make the HTML file for the observation.
-
-    It includes the following Jinja variable references:
-    - aber_y
-    - aber_z
-    - dr50
-    - dr95
-    - roll_err_ending
-    - manvr_angle
-    - mean_date
-    - MICA_PORTAL
-    - obsid_next_url
-    - obsid
-    - obsid_next
-    - obsid_prev
-    - one_shot
-    - one_shot_aber_corrected
-    - one_shot_pitch
-    - one_shot_yaw
-    - obsid_prev_url
-    - roll_err_prev
-    - starcat
-    """
-    logger.info(f"Making HTML for observation {obs.obsid}")
+    """Make the HTML file for the observation."""
+    logger.debug(f"Making HTML for observation {obs.obsid}")
     # Get the template from index_template.html
     template = Template(get_index_template())
+    context = {"MICA_PORTAL": "https://icxc.harvard.edu/mica", "obs": obs}
+    html = template.render(**context)
 
-    html = template.render(**obs.context)
-    path = paths.index_html(obs.obsid, opt.data_root)
+    path = paths.index_html(obs, opt.data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Writing {path}")
     path.write_text(html)
 
 
-def process_obs(obs, opt):
+def process_obs(obs: Observation, opt: argparse.Namespace):
+    """Process the observation."""
     if obs.manvr_event is None:
         logger.info(f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping")
         return
 
-    if not opt.force and paths.info_json(obs.obsid, opt.data_root).exists():
+    info_json_path = paths.info_json(obs, opt.data_root)
+    if opt.force:
+        info_json_path.unlink(missing_ok=True)
+
+    # Skip processing if next_obsid is already in info.json. This implies that the
+    # observation has already been processed.
+    if obs.processed(info_json_path):
+        logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
 
     make_html(obs, opt)
+    info_json_path.write_text(json.dumps(obs.info, indent=2, sort_keys=True))
 
 
 def main(args=None):
@@ -317,7 +330,9 @@ def main(args=None):
         obs.obs_prev = obss[idx - 1] if idx > 0 else None
         obs.obs_next = obss[idx + 1] if idx < len(obss) - 1 else None
 
-        logger.info(f"Processing observation {obs.obsid}")
+        logger.info(
+            f"Processing observation {obs.obsid} {obs.obsid_prev} {obs.obsid_next}"
+        )
         process_obs(obs, opt)
 
 

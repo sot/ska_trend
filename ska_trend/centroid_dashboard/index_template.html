@@ -95,14 +95,14 @@
             <div class="border" style="padding: 10px; margin-bottom: .5cm">
                 <span id="label" style="font-size:150%; font-weight:bold;">
                     {% if obs.obs_prev -%}
-                    <a href="../../{{obs.report_subdir(obs.obs_prev.obsid)}}/index.html">
+                    <a href="../../../{{obs.obs_prev.report_subdir}}/index.html">
                         {{obs.obs_prev.obsid}}</a>
                     {% else -%}
                     None
                     {% endif -%}
                     -- Obsid {{obs.obsid}} --
                     {% if obs.obs_next -%}
-                    <a href="../../{{obs.report_subdir(obs.obs_next.obsid)}}/index.html">
+                    <a href="../../../{{obs.obs_next.report_subdir}}/index.html">
                         {{obs.obs_next.obsid}}</a>
                     {% else -%}
                     None
