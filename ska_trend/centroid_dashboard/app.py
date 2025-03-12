@@ -114,12 +114,14 @@ class Observation(razl.observations.Observation):
         return 0.0
 
     @functools.cached_property
-    def date(self) -> str:
-        """Date of start of KALMAN from telemetry.
-
-        TODO: change name to date_kalman_start?
-        """
+    def kalman_start(self) -> str:
+        """Date of start of KALMAN from telemetry."""
         return self.manvr_event.kalman_start
+
+    @functools.cached_property
+    def kalman_stop(self) -> str:
+        """Date of stop of KALMAN from telemetry."""
+        return self.manvr_event.npnt_stop
 
     @functools.cached_property
     def info(self) -> str:
@@ -128,7 +130,8 @@ class Observation(razl.observations.Observation):
             "aber_y",
             "aber_z",
             "date_starcat",
-            "date",
+            "kalman_start",
+            "kalman_stop",
             "manvr_angle",
             "obsid_next",
             "obsid_prev",
@@ -298,21 +301,19 @@ def make_html(obs: Observation, opt: argparse.Namespace):
     path.write_text(html)
 
 
-def get_crs(obs):
+def get_centroid_resids(obs: Observation):
     """
-    Get OBC centroid residuals per obsid for all slots.
+    Get OBC centroid residuals for ``obs`` for all guide slots.
 
-    This is with respect to both the OBC and ground aspect solution.
-
-    :param obsid: obsid
+    This is relative to the OBC attitude solution.
     """
     crs = {}
     ok = np.isin(obs.starcat["type"], ["BOT", "GUI"])
     cat = obs.starcat[ok]
 
     cr = CentroidResiduals(
-        start=obs.manvr_event.kalman_start,
-        stop=obs.manvr_event.npnt_stop,
+        start=obs.kalman_start,
+        stop=obs.kalman_stop,
     )
     cr.set_atts("obc")
 
@@ -329,16 +330,52 @@ def get_crs(obs):
     return crs
 
 
-def plot_crs_per_obsid(crs, save_path=None):
+def plot_n_kalman(obs, plot_dir, save=False):
+    """
+    Fetch and plot number of Kalman stars for the obsid.
+    """
+    d = events.dwells.filter(obsid=obsid)[0]
+    start = d.start
+    stop = d.stop
+    n_kalman = get_n_kalman(start, stop)
+
+    plt.figure(figsize=(8, 2.5))
+
+    t0 = n_kalman.times[0]
+
+    # The Kalman vals are strings, so these can be out of order on y axis
+    # if not handled as ints.
+    plot_cxctime(n_kalman.times, n_kalman.vals.astype(int), color="k")
+    plot_cxctime([t0, t0 + 1000], [0.5, 0.5], lw=3, color="orange")
+
+    plt.text(CxoTime(t0).plot_date, 0.7, "1 ksec")
+    plt.ylabel("# Kalman stars")
+    ylims = plt.ylim()
+    plt.ylim(-0.2, ylims[1] + 0.2)
+    plt.grid(ls=":")
+
+    plt.subplots_adjust(left=0.1, right=0.95, bottom=0.25, top=0.95)
+
+    if save:
+        outroot = os.path.join(plot_dir, f"n_kalman_{obsid}")
+        logger.info(f"Writing plot file {outroot}.png")
+        plt.savefig(outroot + ".png")
+        plt.close()
+
+
+def plot_crs_per_obsid(crs: CentroidResiduals, save_path: Path | None = None):
     """
     Make png plot of OBC centroid residuals in each slot.
 
     Residuals computed using ground attitude solution for science observations
     and OBC attitude solution for ER observations.
 
-    :param crs: dictionary with keys 'ground' and 'obc', dictionary values
-                are also dictionaries keyed by slot number containing
-                corresponding CentroidResiduals objects
+    Parameters
+    ----------
+    crs : dict
+        Dictionary of CentroidResiduals objects keyed by slot.
+    save_path : Path, optional
+        Path to save the plot if not None.
     """
 
     colors = {"yag": "k", "zag": "slategray"}
@@ -398,8 +435,6 @@ def plot_crs_per_obsid(crs, save_path=None):
         fig.savefig(save_path, dpi=150)
         plt.close(fig)
 
-    # return crs
-
 
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
@@ -417,7 +452,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
 
-    crs = get_crs(obs)
+    crs = get_centroid_resids(obs)
     plot_crs_per_obsid(
         crs,
         save_path=paths.report_dir(obs, opt.data_root) / "centroid_resids.png",

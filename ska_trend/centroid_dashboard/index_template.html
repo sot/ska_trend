@@ -116,7 +116,7 @@
                     <h2>Performance Details</h2>
 
                     <pre>
-OBSID <a href="{{MICA_PORTAL}}/{{obs.obsid}}">{{obs.obsid}}</a>         Date start: {{obs.date}}
+OBSID <a href="{{MICA_PORTAL}}/{{obs.obsid}}">{{obs.obsid}}</a>         Date start: {{obs.kalman_start}}
 
   One shot Pitch: {{"{:7.2f}".format(obs.one_shot_pitch)}} arcsec    Aber-y = {{"{:6.2f}".format(obs.aber_y)}} arcsec
   One shot Yaw:   {{"{:7.2f}".format(obs.one_shot_yaw)}} arcsec    Aber-z = {{"{:6.2f}".format(obs.aber_z)}} arcsec
@@ -187,15 +187,15 @@ Next Observation
 
         <div id="rightsmall" class="border"
             style="padding-top: 10px; margin-bottom: .5cm">
-            <img src="observed_drs_{obsid}.png" width="635" height="198">
-        </div>
-        <div id="rightsmall" class="border"
-            style="padding-top: 10px; margin-bottom: .5cm">
             <img src="centroid_resids.png" width="635">
         </div>
         <div id="rightsmall" class="border"
             style="padding-top: 10px; margin-bottom: .5cm">
-            <img src="n_kalman_{obsid}.png" width="635" height="198">
+            <img src="n_kalman.png" width="635">
+        </div>
+        <div id="rightsmall" class="border"
+            style="padding-top: 10px; margin-bottom: .5cm">
+            <img src="observed_drs_{obsid}.png" width="635" height="198">
         </div>
 
     </div>
