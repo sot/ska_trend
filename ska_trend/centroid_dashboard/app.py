@@ -1,4 +1,5 @@
 import argparse
+import copy
 import functools
 import json
 from dataclasses import dataclass
@@ -11,8 +12,10 @@ import kadi.events as ke
 import numpy as np
 import parse_cm.paths
 import razl.observations
+from chandra_aca.centroid_resid import CentroidResiduals
 from cxotime import CxoTime, CxoTimeLike  # , CxoTimeDescriptor
 from jinja2 import Template
+from matplotlib import pyplot as plt
 from ska_helpers.logging import basic_logger
 from starcheck.state_checks import calc_man_angle_for_duration
 
@@ -295,6 +298,109 @@ def make_html(obs: Observation, opt: argparse.Namespace):
     path.write_text(html)
 
 
+def get_crs(obs):
+    """
+    Get OBC centroid residuals per obsid for all slots.
+
+    This is with respect to both the OBC and ground aspect solution.
+
+    :param obsid: obsid
+    """
+    crs = {}
+    ok = np.isin(obs.starcat["type"], ["BOT", "GUI"])
+    cat = obs.starcat[ok]
+
+    cr = CentroidResiduals(
+        start=obs.manvr_event.kalman_start,
+        stop=obs.manvr_event.npnt_stop,
+    )
+    cr.set_atts("obc")
+
+    for slot, agasc_id in zip(cat["slot"], cat["id"], strict=True):
+        try:
+            cr.set_centroids("obc", slot=slot)
+            cr.set_star(agasc_id=agasc_id)
+            cr.calc_residuals()
+            crs[slot] = copy.copy(cr)
+        except Exception:
+            crs[slot] = None
+            print(f"Could not compute crs for {obs.obsid} slot {slot})")
+
+    return crs
+
+
+def plot_crs_per_obsid(crs, save_path=None):
+    """
+    Make png plot of OBC centroid residuals in each slot.
+
+    Residuals computed using ground attitude solution for science observations
+    and OBC attitude solution for ER observations.
+
+    :param crs: dictionary with keys 'ground' and 'obc', dictionary values
+                are also dictionaries keyed by slot number containing
+                corresponding CentroidResiduals objects
+    """
+
+    colors = {"yag": "k", "zag": "slategray"}
+
+    n_slots = len(crs)
+    fig, axes = plt.subplots(nrows=n_slots, ncols=1, figsize=(8, n_slots * 7 / 8))
+
+    legend = False
+
+    for slot, ax in zip(crs, axes, strict=True):
+        for coord in ["yag", "zag"]:
+            resids_obc = getattr(crs[slot], f"d{coord}s")
+            times_obc = getattr(crs[slot], f"{coord}_times")
+
+            if len(times_obc) == 0:
+                continue
+
+            ok = np.abs(resids_obc) <= 5
+
+            ax.plot(
+                times_obc - times_obc[0],
+                np.ma.array(resids_obc, mask=~ok),
+                color=colors[coord],
+                alpha=0.9,
+                label=f"d{coord}",
+            )
+
+            if np.sum(~ok) > 0:
+                ax.plot(
+                    times_obc - times_obc[0],
+                    np.ma.array(resids_obc, mask=ok),
+                    color="crimson",
+                    alpha=0.9,
+                )
+
+        ax.grid(ls=":")
+        ylims = ax.get_ylim()
+        if max(np.abs(ylims)) < 5:
+            ax.set_ylim(-6, 6)
+            ax.set_yticks([-5, 0, 5], ["-5", "0", "5"])
+        else:
+            ax.set_ylim(-12, 12)
+            ax.set_yticks([-10, -5, 0, 5, 10], ["-10", "-5", "0", "5", "10"])
+        ax.set_xlabel("Time (sec)")
+        ax.set_ylabel(f"Slot {slot}\n(arcsec)")
+
+        ax.get_yaxis().set_label_coords(-0.065, 0.5)
+        _, labels = ax.get_legend_handles_labels()
+        if len(labels) > 0 and not legend:
+            ax.legend(loc=1)
+            legend = True
+
+    plt.subplots_adjust(left=0.1, right=0.95, hspace=0, bottom=0.08, top=0.98)
+
+    if save_path:
+        logger.info(f"Writing plot file {save_path}")
+        fig.savefig(save_path, dpi=150)
+        plt.close(fig)
+
+    # return crs
+
+
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
     if obs.manvr_event is None:
@@ -311,11 +417,20 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
 
+    crs = get_crs(obs)
+    plot_crs_per_obsid(
+        crs,
+        save_path=paths.report_dir(obs, opt.data_root) / "centroid_resids.png",
+    )
+
     make_html(obs, opt)
     info_json_path.write_text(json.dumps(obs.info, indent=2, sort_keys=True))
 
 
 def main(args=None):
+    # Always non-interactive plots for command-line app
+    plt.switch_backend("agg")
+
     opt = get_opt().parse_args(args)
     logger.setLevel(opt.log_level)
 
