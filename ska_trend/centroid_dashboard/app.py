@@ -13,10 +13,12 @@ import numpy as np
 import parse_cm.paths
 import razl.observations
 from chandra_aca.centroid_resid import CentroidResiduals
+from cheta import fetch_eng
 from cxotime import CxoTime, CxoTimeLike  # , CxoTimeDescriptor
 from jinja2 import Template
 from matplotlib import pyplot as plt
 from ska_helpers.logging import basic_logger
+from ska_matplotlib import plot_cxctime
 from starcheck.state_checks import calc_man_angle_for_duration
 
 from . import paths
@@ -330,36 +332,30 @@ def get_centroid_resids(obs: Observation):
     return crs
 
 
-def plot_n_kalman(obs, plot_dir, save=False):
+def plot_n_kalman(start, stop, save_path: Path | None = None):
     """
     Fetch and plot number of Kalman stars for the obsid.
     """
-    d = events.dwells.filter(obsid=obsid)[0]
-    start = d.start
-    stop = d.stop
-    n_kalman = get_n_kalman(start, stop)
+    n_kalman = fetch_eng.Msid("aokalstr", start, stop)
 
-    plt.figure(figsize=(8, 2.5))
+    fig, ax = plt.subplots(figsize=(8, 2.5))
 
+    # The Kalman vals are strings, so use raw_vals.
+    plot_cxctime(n_kalman.times, n_kalman.raw_vals, color="k", ax=ax)
+
+    # Draw a line to indicate 1 ksec
     t0 = n_kalman.times[0]
+    plot_cxctime([t0, t0 + 1000], [0.5, 0.5], lw=3, color="orange", ax=ax)
+    ax.text(CxoTime(t0).plot_date, 0.7, "1 ksec")
 
-    # The Kalman vals are strings, so these can be out of order on y axis
-    # if not handled as ints.
-    plot_cxctime(n_kalman.times, n_kalman.vals.astype(int), color="k")
-    plot_cxctime([t0, t0 + 1000], [0.5, 0.5], lw=3, color="orange")
-
-    plt.text(CxoTime(t0).plot_date, 0.7, "1 ksec")
-    plt.ylabel("# Kalman stars")
-    ylims = plt.ylim()
-    plt.ylim(-0.2, ylims[1] + 0.2)
-    plt.grid(ls=":")
-
+    ax.set_ylabel("# Kalman stars")
+    ax.set_ylim(-0.2, 8.2)
+    ax.grid(ls=":")
     plt.subplots_adjust(left=0.1, right=0.95, bottom=0.25, top=0.95)
 
-    if save:
-        outroot = os.path.join(plot_dir, f"n_kalman_{obsid}")
-        logger.info(f"Writing plot file {outroot}.png")
-        plt.savefig(outroot + ".png")
+    if save_path:
+        logger.info(f"Writing plot file {save_path}")
+        fig.savefig(save_path, dpi=150)
         plt.close()
 
 
@@ -453,10 +449,9 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         return
 
     crs = get_centroid_resids(obs)
-    plot_crs_per_obsid(
-        crs,
-        save_path=paths.report_dir(obs, opt.data_root) / "centroid_resids.png",
-    )
+    report_dir = paths.report_dir(obs, opt.data_root)
+    plot_crs_per_obsid(crs, report_dir / "centroid_resids.png")
+    plot_n_kalman(obs.kalman_start, obs.kalman_stop, report_dir / "n_kalman.png")
 
     make_html(obs, opt)
     info_json_path.write_text(json.dumps(obs.info, indent=2, sort_keys=True))
