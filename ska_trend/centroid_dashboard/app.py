@@ -4,17 +4,20 @@ import functools
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
+import agasc
 import astropy.units as u
+import chandra_aca.plot
 import kadi.commands as kc
 import kadi.events as ke
 import numpy as np
 import parse_cm.paths
 import razl.observations
 from chandra_aca.centroid_resid import CentroidResiduals
+from chandra_aca.transform import yagzag_to_pixels
 from cheta import fetch_eng
-from cxotime import CxoTime, CxoTimeLike  # , CxoTimeDescriptor
+from cxotime import CxoTime, CxoTimeLike
 from jinja2 import Template
 from matplotlib import pyplot as plt
 from ska_helpers.logging import basic_logger
@@ -22,6 +25,9 @@ from ska_matplotlib import plot_cxctime
 from starcheck.state_checks import calc_man_angle_for_duration
 
 from . import paths
+
+if TYPE_CHECKING:
+    from proseco.catalog import ACATable
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
 NDAYS_DEFAULT = 7
@@ -281,6 +287,8 @@ def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]
             for k in razl.observations.Observation.__annotations__
         }
         obs = Observation(**kwargs)
+        # In this application we only care about guide star slots
+        obs.starcat = obs.starcat[np.isin(obs.starcat["type"], ["BOT", "GUI"])]
         obss.append(obs)
         logger.info(
             f"Found observation {obs.obsid} at {obs.obs_start} with {len(obs.manvrs)} manvrs"
@@ -303,23 +311,35 @@ def make_html(obs: Observation, opt: argparse.Namespace):
     path.write_text(html)
 
 
-def get_centroid_resids(obs: Observation):
+def get_centroid_resids(
+    start: CxoTimeLike,
+    stop: CxoTimeLike,
+    starcat: "ACATable",
+) -> dict[int, CentroidResiduals]:
     """
-    Get OBC centroid residuals for ``obs`` for all guide slots.
+    Get OBC centroid residuals for all guide slots.
 
     This is relative to the OBC attitude solution.
+
+    Parameters
+    ----------
+    start : CxoTimeLike
+        Start time for the centroid residuals.
+    stop : CxoTimeLike
+        Stop time for the centroid residuals.
+    starcat : ACATable
+        Star catalog table.
+
+    Returns
+    -------
+    dict
+        Dictionary of CentroidResiduals objects keyed by slot.
     """
     crs = {}
-    ok = np.isin(obs.starcat["type"], ["BOT", "GUI"])
-    cat = obs.starcat[ok]
-
-    cr = CentroidResiduals(
-        start=obs.kalman_start,
-        stop=obs.kalman_stop,
-    )
+    cr = CentroidResiduals(start, stop)
     cr.set_atts("obc")
 
-    for slot, agasc_id in zip(cat["slot"], cat["id"], strict=True):
+    for slot, agasc_id in zip(starcat["slot"], starcat["id"], strict=True):
         try:
             cr.set_centroids("obc", slot=slot)
             cr.set_star(agasc_id=agasc_id)
@@ -327,7 +347,7 @@ def get_centroid_resids(obs: Observation):
             crs[slot] = copy.copy(cr)
         except Exception:
             crs[slot] = None
-            print(f"Could not compute crs for {obs.obsid} slot {slot})")
+            print(f"Could not compute crs for slot {slot})")
 
     return crs
 
@@ -355,11 +375,11 @@ def plot_n_kalman(start, stop, save_path: Path | None = None):
 
     if save_path:
         logger.info(f"Writing plot file {save_path}")
-        fig.savefig(save_path, dpi=150)
+        fig.savefig(save_path)
         plt.close()
 
 
-def plot_crs_per_obsid(crs: CentroidResiduals, save_path: Path | None = None):
+def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None):
     """
     Make png plot of OBC centroid residuals in each slot.
 
@@ -428,8 +448,64 @@ def plot_crs_per_obsid(crs: CentroidResiduals, save_path: Path | None = None):
 
     if save_path:
         logger.info(f"Writing plot file {save_path}")
-        fig.savefig(save_path, dpi=150)
+        fig.savefig(save_path)
         plt.close(fig)
+
+
+def plot_crs_scatter(
+    starcat: "ACATable",
+    crs: dict[int, CentroidResiduals],
+    scale: float = 20,
+    save_path: Path | None = None,
+):
+    """
+    Make visual plot of OBC centroid residuals.
+
+    Plot visualization of OBC centroid residuals with respect to ground (obc)
+    aspect solution for science (ER) observations in the yang/zang plain.
+
+    Parameters
+    ----------
+    starcat : ACATable
+        Star catalog table.
+    crs : dict
+        Dictionary of CentroidResiduals objects keyed by slot.
+    scale : float, optional
+        Scale factor for residuals.
+    save_path : Path, optional
+        Path to save the plot if not None.
+    """
+    # Relabel idx in a copy of starcat so plot is numbered by slot.
+    cat = starcat.copy()
+    cat["idx"] = cat["slot"]
+
+    # Use star catalog for field stars
+    stars = agasc.get_stars(cat["id"])
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    chandra_aca.plot.plot_stars(cat.att, cat, stars, ax=ax)
+    colors = ["orange", "forestgreen", "steelblue", "maroon", "gray"]
+
+    for entry in cat:
+        yag = entry["yang"]
+        zag = entry["zang"]
+        slot = entry["slot"]
+        row, col = yagzag_to_pixels(yag, zag)
+        # 1 px -> factor px; 5 arcsec = 5 * factor arcsec
+        # Minus sign for y-coord to reflect sign flip in the pixel
+        # to yag conversion and yag scale going from positive to negative
+        yy = row - crs[slot].dyags * scale
+        zz = col + crs[slot].dzags * scale
+        ax.plot(yy, zz, alpha=0.3, marker=",", color=colors[slot - 3])
+        circle = plt.Circle((row, col), 5 * scale, color="darkorange", fill=False)
+        ax.add_artist(circle)
+
+    plt.text(-511, 530, "ring radius = 5 arcsec (scaled)", color="darkorange")
+
+    if save_path:
+        logger.info(f"Writing plot file {save_path}")
+        fig.savefig(save_path)
+        plt.close()
 
 
 def process_obs(obs: Observation, opt: argparse.Namespace):
@@ -448,10 +524,15 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
 
-    crs = get_centroid_resids(obs)
     report_dir = paths.report_dir(obs, opt.data_root)
-    plot_crs_per_obsid(crs, report_dir / "centroid_resids.png")
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    crs = get_centroid_resids(obs.kalman_start, obs.kalman_stop, obs.starcat)
+    plot_crs_time(crs, report_dir / "centroid_resids_time.png")
     plot_n_kalman(obs.kalman_start, obs.kalman_stop, report_dir / "n_kalman.png")
+    plot_crs_scatter(
+        obs.starcat, crs, save_path=report_dir / "centroid_resids_scatter.png"
+    )
 
     make_html(obs, opt)
     info_json_path.write_text(json.dumps(obs.info, indent=2, sort_keys=True))
@@ -478,7 +559,13 @@ def main(args=None):
         logger.info(
             f"Processing observation {obs.obsid} {obs.obsid_prev} {obs.obsid_next}"
         )
-        process_obs(obs, opt)
+        try:
+            process_obs(obs, opt)
+        except Exception:
+            import traceback
+
+            tb = traceback.format_exc()
+            logger.error(f"Error processing {obs.obsid}:\n{tb}")
 
 
 if __name__ == "__main__":
