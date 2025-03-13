@@ -482,7 +482,7 @@ def plot_crs_scatter(
     # Use star catalog for field stars
     stars = agasc.get_stars(cat["id"])
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(5, 5))
     chandra_aca.plot.plot_stars(cat.att, cat, stars, ax=ax)
     colors = ["orange", "forestgreen", "steelblue", "maroon", "gray"]
 
