@@ -83,7 +83,9 @@ OBSID <a href="{{MICA_PORTAL}}/{{obs.obsid}}">{{obs.obsid}}</a>
 Kalman start: {{obs.kalman_start}}
 
 Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
+{% if obs.manvr_angles_text %}
 {{obs.manvr_angles_text }}
+{% endif %}
 
 One shot:
  Total     : {{"{:.1f}".format(obs.one_shot)}} arcsec

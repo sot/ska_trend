@@ -184,12 +184,15 @@ class Observation(razl.observations.Observation):
         return angles
 
     @functools.cached_property
-    def manvr_angles_text(self):
+    def manvr_angles_text(self) -> str | None:
         if len(self.manvr_angles) == 1:
-            out = ""
+            out = None
         else:
-            angles = " + ".join([f"{angle:.1f}" for angle in self.manvr_angles])
-            out = f" Segmented: {angles} deg"
+            lines = []
+            lines.append(" Segments:")
+            for manvr, manvr_angle in zip(self.manvrs, self.manvr_angles, strict=True):
+                lines.append(f"  {manvr_angle:5.1f} deg in {manvr.dur:.1f} sec")
+            out = "\n".join(lines)
         return out
 
     @functools.cached_property
@@ -562,7 +565,10 @@ def main(args=None):
         )
         try:
             process_obs(obs, opt)
-        except Exception:
+        except Exception as err:
+            raise
+
+            print(f"Error processing {obs.obsid}: {err}")
             import traceback
 
             tb = traceback.format_exc()
