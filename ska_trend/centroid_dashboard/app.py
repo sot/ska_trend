@@ -18,7 +18,7 @@ from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
 from cheta import fetch_eng
 from cxotime import CxoTime, CxoTimeLike
-from jinja2 import Template
+from jinja2 import Environment
 from matplotlib import pyplot as plt
 from ska_helpers.logging import basic_logger
 from ska_matplotlib import plot_cxctime
@@ -301,7 +301,8 @@ def make_html(obs: Observation, opt: argparse.Namespace):
     """Make the HTML file for the observation."""
     logger.debug(f"Making HTML for observation {obs.obsid}")
     # Get the template from index_template.html
-    template = Template(get_index_template())
+    env = Environment(trim_blocks=True, lstrip_blocks=True)
+    template = env.from_string(get_index_template())
     context = {"MICA_PORTAL": "https://icxc.harvard.edu/mica", "obs": obs}
     html = template.render(**context)
 

@@ -57,19 +57,19 @@
 
         <div class="border" style="padding: 10px; margin-bottom: .5cm">
             <span id="label" style="font-size:150%; font-weight:bold;">
-                {% if obs.obs_prev -%}
+                {% if obs.obs_prev %}
                 <a href="../../../{{obs.obs_prev.report_subdir}}/index.html">
                     Prev</a>
-                {% else -%}
+                {% else %}
                 None
-                {% endif -%}
+                {% endif %}
                 - {{obs.obsid}} -
-                {% if obs.obs_next -%}
+                {% if obs.obs_next %}
                 <a href="../../../{{obs.obs_next.report_subdir}}/index.html">
                     Next</a>
-                {% else -%}
+                {% else %}
                 None
-                {% endif -%}
+                {% endif %}
             </span>
         </div>
 
@@ -80,33 +80,35 @@
 
                 <pre>
 OBSID <a href="{{MICA_PORTAL}}/{{obs.obsid}}">{{obs.obsid}}</a>
-Date start: {{obs.kalman_start}}
+Kalman start: {{obs.kalman_start}}
 
-  One shot Pitch: {{"{:7.2f}".format(obs.one_shot_pitch)}} arcsec
-  One shot Yaw:   {{"{:7.2f}".format(obs.one_shot_yaw)}} arcsec
-  One shot = {{"{:.2f}".format(obs.one_shot)}} arcsec
-  One shot aber corr = {{"{:.2f}".format(obs.one_shot_aber_corrected)}} arcsec
-  Aber (y,z) = {{"{:6.2f}".format(obs.aber_y)}}, {{"{:6.2f}".format(obs.aber_z)}} arcsec
-  Manvr angle = {{"{:.2f}".format(obs.manvr_angle)}} deg
-  {{obs.manvr_angles_text -}}
+Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
+{{obs.manvr_angles_text }}
 
-  dr50 = {{"{:.2f}".format(obs.dr50)}},  arcsec
-  dr95 = {{"{:.2f}".format(obs.dr95)}} arcsec
+One shot:
+ Total     : {{"{:.1f}".format(obs.one_shot)}} arcsec
+ Pitch, yaw: {{"{:5.1f}".format(obs.one_shot_pitch)}}, {{"{:5.1f}".format(obs.one_shot_yaw)}} arcsec
+ Aber corr : {{"{:.1f}".format(obs.one_shot_aber_corrected)}} arcsec
+ Aber (y,z): {{"{:5.1f}".format(obs.aber_y)}}, {{"{:5.1f}".format(obs.aber_z)}} arcsec
 
-  End roll err = {{"{:.2f}".format(obs.roll_err_ending)}} arcsec
+{% if obs.dr50 > -10 %}
+Roll err:
+ 50%, 95%: {{"{:.2f}".format(obs.dr50)}}, {{"{:.2f}".format(obs.dr95)}} arcsec
+ End: {{"{:.2f}".format(obs.roll_err_ending)}} arcsec
+{% endif %}
 
-Preceding Observation: {% if obs.obs_prev -%}
+Preceding Observation: {% if obs.obs_prev %}
 ObsID <a href="{{MICA_PORTAL}}/{{obs.obs_prev.obsid}}">{{obs.obs_prev.obsid}}</a>
   End roll error = {{"{:.2f}".format(obs.roll_err_prev)}} arcsec
-{% else -%}
+{% else %}
   None
-{% endif -%}
+{% endif %}
 
-Next Observation: {% if obs.obs_next -%}
+Next Observation: {% if obs.obs_next %}
 ObsID <a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a>
-{% else -%}
+{% else %}
   None
-{% endif -%}
+{% endif %}
                 </pre>
             </div>
         </div>
