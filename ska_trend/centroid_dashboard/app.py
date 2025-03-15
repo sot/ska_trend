@@ -20,6 +20,7 @@ from cheta import fetch_eng
 from cxotime import CxoTime, CxoTimeLike
 from jinja2 import Environment
 from matplotlib import pyplot as plt
+from Quaternion import Quat
 from ska_helpers.logging import basic_logger
 from ska_matplotlib import plot_cxctime
 from starcheck.state_checks import calc_man_angle_for_duration
@@ -245,6 +246,111 @@ class Observation(razl.observations.Observation):
         summary["median_dy"] = 0.0
         summary["median_dz"] = 0.0
         return summary
+
+
+def get_observed_att_errors(obsid, crs=None, on_the_fly=False):
+    """
+    Get OBC pitch, yaw, roll errors with respect to the ground aspect solution
+
+    :param obsid: obsid
+    :param crs: dictionary with keys 'ground' and 'obc'. Values are also
+                dictionaries keyd by slot number containing corresponding
+                CentroidResiduals objects.
+    :param on_the_fly:
+
+    on_the_fly determins whether centroids residuals are provided
+    or need to computed for the requested obsid
+    """
+    logger.info(f"Running get_observed_att_errors for {obsid}")
+
+    if len(ke.dwells.filter(obsid=obsid)) == 0:
+        raise NoDwellError(f"No dwell for obsid={obsid}")
+
+    att_errors = {"dr": [], "dy": [], "dp": []}
+
+    # flag = 0 OK, ground aspect solution
+    # flag = 1 'ground' is None for all slots, use obc solution
+    # flag = 2 no common times between ground vs obc times
+    # flag = 3 times could not be matched for yet another reason
+    flag = 0
+
+    if on_the_fly:
+        crs = get_crs_per_obsid(obsid)
+    elif crs is None:
+        raise Exception("Provide crs if on_the_fly is False")
+
+    if all(item is None for item in crs["ground"].values()):
+        # No good ground solution in any of the slots
+        # Use obc aspect solution
+        flag = 1
+        crs_ref = crs["obc"]
+        logger.info(
+            f"No ground aspect solution for {obsid}. Using obc aspect solution for reference"
+        )
+    else:
+        crs_ref = crs["ground"]
+
+    try:
+        # Adjust time axis if needed
+        # TODO: what if slot 3 is not tracking a star?
+
+        ref_att_times = np.round(crs_ref[3].att_times, decimals=2)
+        obc_att_times = np.round(crs["obc"][3].att_times, decimals=2)
+
+        common_times, in_ref, in_obc = np.intersect1d(
+            ref_att_times, obc_att_times, return_indices=True
+        )
+        if len(common_times) == 0:
+            # no common times for obc and grnd solutions
+            flag = 2
+            raise ValueError("No common time vals for obc and ground att times")
+
+        ref_att_times_adjusted = ref_att_times[in_ref]
+        obc_att_times_adjusted = obc_att_times[in_obc]
+        att_ref = crs_ref[3].atts[in_ref]
+        att_obc = crs["obc"][3].atts[in_obc]
+
+        if not np.all(obc_att_times_adjusted == ref_att_times_adjusted):
+            flag = 3
+            raise ValueError("Could not align obc and ref aspect solution times")
+
+    except Exception as err:
+        logger.info(f"ERROR get_observed_att_errors: {err}")
+        return {"obsid": obsid, "flag": flag}
+
+    # Compute attitude errors
+    att_errors = get_dr_dp_dy(att_ref, att_obc)
+
+    out = {
+        "obsid": obsid,
+        "time": obc_att_times_adjusted,
+        "dr": att_errors["dr"],
+        "dy": att_errors["dy"],
+        "dp": att_errors["dp"],
+        "flag": flag,
+        "crs": crs,
+    }
+
+    return out
+
+
+def get_dr_dp_dy(refs, atts):
+    att_errors = {}
+    drs = []
+    dps = []
+    dys = []
+
+    for ref_q, att_q in zip(refs, atts, strict=True):
+        dq = Quat(ref_q).dq(att_q)
+        drs.append(dq.roll0 * 3600)
+        dps.append(dq.pitch * 3600)
+        dys.append(dq.yaw * 3600)
+
+    att_errors["dr"] = np.array(drs)
+    att_errors["dp"] = np.array(dps)
+    att_errors["dy"] = np.array(dys)
+
+    return att_errors
 
 
 def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]:
