@@ -2,8 +2,10 @@ import argparse
 import copy
 import functools
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
+import subprocess
 from typing import TYPE_CHECKING, Optional
 
 import agasc
@@ -12,14 +14,16 @@ import chandra_aca.plot
 import kadi.commands as kc
 import kadi.events as ke
 import numpy as np
+import numpy.typing as npt
 import parse_cm.paths
 import razl.observations
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
-from cheta import fetch_eng
+from cheta import fetch, fetch_eng
 from cxotime import CxoTime, CxoTimeLike
 from jinja2 import Environment
 from matplotlib import pyplot as plt
+from mica.archive import asp_l1
 from Quaternion import Quat
 from ska_helpers.logging import basic_logger
 from ska_matplotlib import plot_cxctime
@@ -32,6 +36,7 @@ if TYPE_CHECKING:
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
 NDAYS_DEFAULT = 7
+SKA = Path(os.environ["SKA"])
 
 logger = basic_logger("centroid_dashboard")
 
@@ -59,6 +64,11 @@ def get_opt():
         action="store_true",
     )
     parser.add_argument(
+        "--remote-copy",
+        help="Copy data from remote archive if not available locally",
+        action="store_true",
+    )
+    parser.add_argument(
         "--log-level", default="INFO", help="Logging level (default=INFO)"
     )
     return parser
@@ -74,17 +84,6 @@ def get_index_template():
 class Observation(razl.observations.Observation):
     obs_next: Optional["Observation"] = None
     obs_prev: Optional["Observation"] = None
-
-    def processed(self, info_json_path: Path):
-        """Check if the observation has already been processed.
-
-        The check is based on the existence of the info.json file and the non-None
-        values obsid_next and obsid_prev keys in the file.
-        """
-        if not info_json_path.exists():
-            return False
-        info = json.loads(info_json_path.read_text())
-        return info["obsid_next"] is not None and info["obsid_prev"] is not None
 
     @functools.cached_property
     def report_subdir(self):
@@ -248,109 +247,118 @@ class Observation(razl.observations.Observation):
         return summary
 
 
-def get_observed_att_errors(obsid, crs=None, on_the_fly=False):
+def processed(info_json_path: Path):
+    """Check if the observation has already been fully processed.
+
+    The check is based on the existence of the info.json file and the non-None values
+    obsid_next and obsid_prev keys in the file. This file is created/updated at the end
+    of the processing.
     """
-    Get OBC pitch, yaw, roll errors with respect to the ground aspect solution
+    if not info_json_path.exists():
+        return False
+    info = json.loads(info_json_path.read_text())
+    return info["obsid_next"] is not None and info["obsid_prev"] is not None
 
-    :param obsid: obsid
-    :param crs: dictionary with keys 'ground' and 'obc'. Values are also
-                dictionaries keyd by slot number containing corresponding
-                CentroidResiduals objects.
-    :param on_the_fly:
 
-    on_the_fly determins whether centroids residuals are provided
-    or need to computed for the requested obsid
+def get_gnd_atts(
+    obsid: int, remote_copy: bool = False
+) -> tuple[npt.NDArray, npt.NDArray]:
     """
-    logger.info(f"Running get_observed_att_errors for {obsid}")
+    Get ground attitude solution for the observation.
 
-    if len(ke.dwells.filter(obsid=obsid)) == 0:
-        raise NoDwellError(f"No dwell for obsid={obsid}")
+    If `remote_copy` is True and the data are not available locally, copy the data from
+    the remote archive on HEAD.
 
-    att_errors = {"dr": [], "dy": [], "dp": []}
+    Parameters
+    ----------
+    obsid : int
+        Observation ID. If obsid >= 38000, return None.
+    remote_copy : bool, optional
+        If True, copy the data from the remote archive on HEAD.
 
-    # flag = 0 OK, ground aspect solution
-    # flag = 1 'ground' is None for all slots, use obc solution
-    # flag = 2 no common times between ground vs obc times
-    # flag = 3 times could not be matched for yet another reason
-    flag = 0
+    Returns
+    -------
+    tuple
+        Tuple of ground attitude quaternions (Nx4) and times (N).
+    """
+    if obsid >= 38000:
+        return None
 
-    if on_the_fly:
-        crs = get_crs_per_obsid(obsid)
-    elif crs is None:
-        raise Exception("Provide crs if on_the_fly is False")
+    obsid_str = f"{obsid:05d}"
+    obs2_dir = f"data/mica/archive/asp1/{obsid_str[:2]}"
+    obs2_dir_local = SKA / obs2_dir
+    obsid_dir_remote = f"kady:/proj/sot/ska/{obs2_dir}/{obsid_str}*"
+    obsid_dir_local = obs2_dir_local / obsid_str
 
-    if all(item is None for item in crs["ground"].values()):
-        # No good ground solution in any of the slots
-        # Use obc aspect solution
-        flag = 1
-        crs_ref = crs["obc"]
-        logger.info(
-            f"No ground aspect solution for {obsid}. Using obc aspect solution for reference"
-        )
-    else:
-        crs_ref = crs["ground"]
+    if not obsid_dir_local.exists():
+        if remote_copy:
+            obs2_dir_local.mkdir(parents=True, exist_ok=True)
+            cmds = ["rsync", "-av", obsid_dir_remote, f"{obs2_dir_local}/"]
+            logger.info(f"Copying remote data with command: {' '.join(cmds)}")
+            subprocess.check_call(cmds)
+        else:
+            return [], []
 
-    try:
-        # Adjust time axis if needed
-        # TODO: what if slot 3 is not tracking a star?
+    atts, atts_times, _ = asp_l1.get_atts(obsid=obsid)
 
-        ref_att_times = np.round(crs_ref[3].att_times, decimals=2)
-        obc_att_times = np.round(crs["obc"][3].att_times, decimals=2)
+    return atts, atts_times
 
-        common_times, in_ref, in_obc = np.intersect1d(
-            ref_att_times, obc_att_times, return_indices=True
-        )
-        if len(common_times) == 0:
-            # no common times for obc and grnd solutions
-            flag = 2
-            raise ValueError("No common time vals for obc and ground att times")
 
-        ref_att_times_adjusted = ref_att_times[in_ref]
-        obc_att_times_adjusted = obc_att_times[in_obc]
-        att_ref = crs_ref[3].atts[in_ref]
-        att_obc = crs["obc"][3].atts[in_obc]
+def get_obc_gnd_att_deltas(
+    obsid: int, q_att_obc: fetch.Msid, remote_copy: bool = False
+) -> dict[str, npt.ArrayLike]:
+    """
+    Get OBC pitch, yaw, roll errors with respect to the ground aspect solution.
 
-        if not np.all(obc_att_times_adjusted == ref_att_times_adjusted):
-            flag = 3
-            raise ValueError("Could not align obc and ref aspect solution times")
+    Parameters
+    ----------
+    obsid : int
+        Observation ID. If obsid >= 38000, return None.
 
-    except Exception as err:
-        logger.info(f"ERROR get_observed_att_errors: {err}")
-        return {"obsid": obsid, "flag": flag}
+    """
+    if obsid >= 38000:
+        return None
 
-    # Compute attitude errors
-    att_errors = get_dr_dp_dy(att_ref, att_obc)
+    # Get ground attitude solution and times
+    atts_gnd, atts_gnd_times = get_gnd_atts(obsid, remote_copy=remote_copy)
+
+    # If data are not available `get_atts` returns empty arrays.
+    if len(atts_gnd_times) == 0:
+        return None
+
+    # Get OBC attitude solution and times
+    atts_obc = q_att_obc.vals.q
+    atts_obc_times = q_att_obc.times
+
+    tstart = max(atts_gnd_times[0], atts_obc_times[0])
+    tstop = min(atts_gnd_times[-1], atts_obc_times[-1])
+
+    # Ensure that endpoints of telemetry and ground solution are within 5 minutes
+    if atts_gnd_times[-1] - tstop > 300 or atts_obc_times[-1] - tstop > 300:
+        return None
+
+    # Trim OBC telemetry to common time range
+    i0, i1 = np.searchsorted(atts_obc_times, [tstart, tstop])
+    atts_obc = atts_obc[i0:i1]
+    atts_obc_times = atts_obc_times[i0:i1]
+
+    # Sample ground solution at OBC times. Since ground solution is sampled at 0.256 sec
+    # this is good enough for this application.
+    idxs = np.searchsorted(atts_gnd_times, atts_obc_times)
+    atts_gnd = atts_gnd[idxs]
+
+    # Compute the quaternion difference between the OBC and ground solutions
+    q_obc = Quat(q=atts_obc)
+    q_gnd = Quat(q=atts_gnd)
+    dq = q_obc.dq(q_gnd)
 
     out = {
-        "obsid": obsid,
-        "time": obc_att_times_adjusted,
-        "dr": att_errors["dr"],
-        "dy": att_errors["dy"],
-        "dp": att_errors["dp"],
-        "flag": flag,
-        "crs": crs,
+        "time": atts_obc_times,
+        "d_roll": dq.roll0 * 3600,
+        "d_pitch": dq.pitch * 3600,
+        "d_yaw": dq.yaw * 3600,
     }
-
     return out
-
-
-def get_dr_dp_dy(refs, atts):
-    att_errors = {}
-    drs = []
-    dps = []
-    dys = []
-
-    for ref_q, att_q in zip(refs, atts, strict=True):
-        dq = Quat(ref_q).dq(att_q)
-        drs.append(dq.roll0 * 3600)
-        dps.append(dq.pitch * 3600)
-        dys.append(dq.yaw * 3600)
-
-    att_errors["dr"] = np.array(drs)
-    att_errors["dp"] = np.array(dps)
-    att_errors["dy"] = np.array(dys)
-
-    return att_errors
 
 
 def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]:
@@ -406,13 +414,21 @@ def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]
     return obss
 
 
+def path_exists(path: Path | str) -> bool:
+    """Check if the path exists."""
+    return Path(path).exists()
+
+
 def make_html(obs: Observation, opt: argparse.Namespace):
     """Make the HTML file for the observation."""
     logger.debug(f"Making HTML for observation {obs.obsid}")
     # Get the template from index_template.html
     env = Environment(trim_blocks=True, lstrip_blocks=True)
     template = env.from_string(get_index_template())
-    context = {"MICA_PORTAL": "https://icxc.harvard.edu/mica", "obs": obs}
+    context = {
+        "MICA_PORTAL": "https://icxc.harvard.edu/mica",
+        "obs": obs,
+    }
     html = template.render(**context)
 
     path = paths.index_html(obs, opt.data_root)
@@ -425,6 +441,7 @@ def get_centroid_resids(
     start: CxoTimeLike,
     stop: CxoTimeLike,
     starcat: "ACATable",
+    q_att: fetch.Msid,
 ) -> dict[int, CentroidResiduals]:
     """
     Get OBC centroid residuals for all guide slots.
@@ -439,6 +456,8 @@ def get_centroid_resids(
         Stop time for the centroid residuals.
     starcat : ACATable
         Star catalog table.
+    q_att : fetch.Msid
+        Attitude quaternion telemetry for `quat_aoattqt` MSID.
 
     Returns
     -------
@@ -447,7 +466,13 @@ def get_centroid_resids(
     """
     crs = {}
     cr = CentroidResiduals(start, stop)
-    cr.set_atts("obc")
+
+    # Grab attitude telemetry once for all slots, copying each time. This is basically
+    # equivalent to cr.set_atts("obc"), but using quat_aoattqt is more robust.
+    cr.att_source = "obc"
+    cr.atts = q_att.vals.q
+    cr.att_times = q_att.times
+    cr.obsid = starcat.obsid
 
     for slot, agasc_id in zip(starcat["slot"], starcat["id"], strict=True):
         try:
@@ -462,7 +487,39 @@ def get_centroid_resids(
     return crs
 
 
-def plot_n_kalman(start, stop, save_path: Path | None = None):
+def get_q_att_obc(start: CxoTimeLike, stop: CxoTimeLike) -> fetch.Msid | None:
+    """
+    Get the attitude quaternion telemetry for the observation.
+
+    Parameters
+    ----------
+    start : CxoTimeLike
+        Start time for the observation (kalman_start).
+    stop : CxoTimeLike
+        Stop time for the observation (kalman_stop).
+
+    Returns
+    -------
+    fetch.Msid | None
+        The attitude quaternion telemetry for the observation or None if the telemetry
+        does not cover start/stop within 10 seconds.
+    """
+    q_att = fetch.Msid("quat_aoattqt", start, stop)
+
+    tstart = CxoTime(start).secs
+    tstop = CxoTime(stop).secs
+    if abs(tstart - q_att.times[0]) > 10 or abs(tstop - q_att.times[-1]) > 10:
+        return None
+
+    return q_att
+
+
+def plot_n_kalman_delta_roll(
+    start,
+    stop,
+    obc_gnd_att_deltas: dict[str, npt.NDArray] | None,
+    save_path: Path | None = None,
+):
     """
     Fetch and plot number of Kalman stars for the obsid.
     """
@@ -482,6 +539,17 @@ def plot_n_kalman(start, stop, save_path: Path | None = None):
     ax.set_ylim(-0.2, 8.2)
     ax.grid(ls=":")
     plt.subplots_adjust(left=0.1, right=0.95, bottom=0.25, top=0.95)
+
+    if obc_gnd_att_deltas is not None:
+        ax2 = ax.twinx()
+        plot_cxctime(
+            obc_gnd_att_deltas["time"],
+            obc_gnd_att_deltas["d_roll"],
+            color="b",
+            ax=ax2,
+        )
+        ax2.set_ylabel("OBC - GND roll (arcsec)", color="b")
+        ax2.tick_params(axis="y", labelcolor="b")
 
     if save_path:
         logger.info(f"Writing plot file {save_path}")
@@ -630,16 +698,27 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
 
     # Skip processing if next_obsid is already in info.json. This implies that the
     # observation has already been processed.
-    if obs.processed(info_json_path):
+    if processed(info_json_path):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
 
     report_dir = paths.report_dir(obs, opt.data_root)
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    crs = get_centroid_resids(obs.kalman_start, obs.kalman_stop, obs.starcat)
+    start, stop = obs.kalman_start, obs.kalman_stop
+    if (q_att_obc := fetch.Msid("quat_aoattqt", start, stop)) is None:
+        logger.info(f"ObsID {obs.obsid} has insufficient attitude telemetry, skipping")
+        return
+
+    obc_gnd_att_deltas = get_obc_gnd_att_deltas(
+        obs.obsid, q_att_obc, remote_copy=opt.remote_copy
+    )
+    crs = get_centroid_resids(start, stop, obs.starcat, q_att_obc)
+
     plot_crs_time(crs, report_dir / "centroid_resids_time.png")
-    plot_n_kalman(obs.kalman_start, obs.kalman_stop, report_dir / "n_kalman.png")
+    plot_n_kalman_delta_roll(
+        start, stop, obc_gnd_att_deltas, report_dir / "n_kalman_delta_roll.png"
+    )
     plot_crs_scatter(
         obs.starcat, crs, save_path=report_dir / "centroid_resids_scatter.png"
     )
@@ -667,13 +746,11 @@ def main(args=None):
         obs.obs_next = obss[idx + 1] if idx < len(obss) - 1 else None
 
         logger.info(
-            f"Processing observation {obs.obsid} {obs.obsid_prev} {obs.obsid_next}"
+            f"Processing observation {obs.obsid} prev={obs.obsid_prev} next={obs.obsid_next}"
         )
         try:
             process_obs(obs, opt)
         except Exception as err:
-            raise
-
             print(f"Error processing {obs.obsid}: {err}")
             import traceback
 
