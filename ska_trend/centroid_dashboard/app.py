@@ -203,7 +203,7 @@ class Observation(razl.observations.Observation):
         return out
 
     @functools.cached_property
-    def manvr_angle(self):
+    def manvr_angle(self) -> float:
         if (n_manvrs := len(self.manvr_angles)) == 1:
             manvr = self.manvrs[0]
             dq = manvr.att_stop.dq(manvr.att_start)
@@ -217,12 +217,24 @@ class Observation(razl.observations.Observation):
         return angle
 
     @functools.cached_property
-    def obsid_next(self):
+    def obsid_next(self) -> int | None:
         return self.obs_next.obsid if self.obs_next else None
 
     @functools.cached_property
-    def obsid_prev(self):
+    def obsid_prev(self) -> int | None:
         return self.obs_prev.obsid if self.obs_prev else None
+
+    @functools.cached_property
+    def q_att_obc(self) -> fetch.Msid | None:
+        try:
+            out = fetch.Msid("quat_aoattqt", self.kalman_start, self.kalman_stop)
+        except IndexError:
+            # No telemetry unfortunately raises IndexError instead of zero-length Msid
+            return None
+        # Enough data and sampling to end of observation
+        if len(out) == 0 or CxoTime(self.kalman_stop).secs - out.times[-1] > 10:
+            return None
+        return out
 
     @functools.cached_property
     def roll_err_prev(self):
@@ -779,19 +791,20 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     report_dir = paths.report_dir(obs, opt.data_root)
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    start, stop = obs.kalman_start, obs.kalman_stop
-    if (q_att_obc := fetch.Msid("quat_aoattqt", start, stop)) is None:
-        logger.info(f"ObsID {obs.obsid} has insufficient attitude telemetry, skipping")
+    # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
+    if obs.q_att_obc is None:
+        logger.info(f"ObsID {obs.obsid} has insufficient telemetry, skipping")
         return
 
     obc_gnd_att_deltas = get_obc_gnd_att_deltas(
-        obs.obsid, q_att_obc, remote_copy=opt.remote_copy
+        obs.obsid, obs.q_att_obc, remote_copy=opt.remote_copy
     )
     if obc_gnd_att_deltas is not None:
         for key in ["d_roll50", "d_roll95", "d_roll_end"]:
             obs.info[key] = obc_gnd_att_deltas[key]
 
-    crs = get_centroid_resids(start, stop, obs.starcat, q_att_obc)
+    start, stop = obs.kalman_start, obs.kalman_stop
+    crs = get_centroid_resids(start, stop, obs.starcat, obs.q_att_obc)
 
     plot_crs_time(crs, report_dir / "centroid_resids_time.png")
     plot_n_kalman_delta_roll(
