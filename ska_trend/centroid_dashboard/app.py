@@ -147,15 +147,11 @@ class Observation(razl.observations.Observation):
             "one_shot_aber_corrected",
             "one_shot_pitch",
             "one_shot_yaw",
-            "roll_err_ending",
             "roll_err_prev",
         ]
         out = {}
         for attr in attrs:
-            val = getattr(self, attr)
-            if isinstance(val, float):
-                val = round(val, 3)
-            out[attr] = val
+            out[attr] = getattr(self, attr)
 
         return out
 
@@ -216,18 +212,6 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def obsid_prev(self):
         return self.obs_prev.obsid if self.obs_prev else None
-
-    @functools.cached_property
-    def dr50(self):
-        return 0.0
-
-    @functools.cached_property
-    def dr95(self):
-        return 0.0
-
-    @functools.cached_property
-    def roll_err_ending(self):
-        return 0.0
 
     @functools.cached_property
     def roll_err_prev(self):
@@ -306,7 +290,7 @@ def get_gnd_atts(
 
 def get_obc_gnd_att_deltas(
     obsid: int, q_att_obc: fetch.Msid, remote_copy: bool = False
-) -> dict[str, npt.ArrayLike]:
+) -> dict[str]:
     """
     Get OBC pitch, yaw, roll errors with respect to the ground aspect solution.
 
@@ -350,7 +334,7 @@ def get_obc_gnd_att_deltas(
     # Compute the quaternion difference between the OBC and ground solutions
     q_obc = Quat(q=atts_obc)
     q_gnd = Quat(q=atts_gnd)
-    dq = q_obc.dq(q_gnd)
+    dq = q_gnd.dq(q_obc)
 
     out = {
         "time": atts_obc_times,
@@ -358,6 +342,10 @@ def get_obc_gnd_att_deltas(
         "d_pitch": dq.pitch * 3600,
         "d_yaw": dq.yaw * 3600,
     }
+    out["d_roll50"] = np.percentile(np.abs(out["d_roll"]), 50)
+    out["d_roll95"] = np.percentile(np.abs(out["d_roll"]), 95)
+    out["d_roll_end"] = out["d_roll"][-1]
+
     return out
 
 
@@ -527,29 +515,36 @@ def plot_n_kalman_delta_roll(
 
     fig, ax = plt.subplots(figsize=(8, 2.5))
 
+    if obc_gnd_att_deltas is not None:
+        ax2 = ax.twinx()
+        color2 = "C1"
+        plot_cxctime(
+            obc_gnd_att_deltas["time"],
+            obc_gnd_att_deltas["d_roll"],
+            color=color2,
+            alpha=0.5,
+            lw=3,
+            ax=ax2,
+        )
+        ax2.set_ylabel("OBC - GND d_roll (arcsec)", color=color2)
+        ylim = max(np.abs(ax2.get_ylim()).max(), 50)
+        ax2.set_ylim(-ylim, ylim)
+        ax2.tick_params(axis="y", labelcolor=color2)
+
     # The Kalman vals are strings, so use raw_vals.
-    plot_cxctime(n_kalman.times, n_kalman.raw_vals, color="k", ax=ax)
+    color1 = "k"
+    plot_cxctime(n_kalman.times, n_kalman.raw_vals, color=color1, ax=ax)
+    ax.set_ylabel("# Kalman stars", color=color1)
+    ax.set_ylim(-0.2, 8.2)
 
     # Draw a line to indicate 1 ksec
     t0 = n_kalman.times[0]
     plot_cxctime([t0, t0 + 1000], [0.5, 0.5], lw=3, color="orange", ax=ax)
     ax.text(CxoTime(t0).plot_date, 0.7, "1 ksec")
 
-    ax.set_ylabel("# Kalman stars")
-    ax.set_ylim(-0.2, 8.2)
     ax.grid(ls=":")
     plt.subplots_adjust(left=0.1, right=0.95, bottom=0.25, top=0.95)
-
-    if obc_gnd_att_deltas is not None:
-        ax2 = ax.twinx()
-        plot_cxctime(
-            obc_gnd_att_deltas["time"],
-            obc_gnd_att_deltas["d_roll"],
-            color="b",
-            ax=ax2,
-        )
-        ax2.set_ylabel("OBC - GND roll (arcsec)", color="b")
-        ax2.tick_params(axis="y", labelcolor="b")
+    plt.tight_layout()
 
     if save_path:
         logger.info(f"Writing plot file {save_path}")
@@ -686,6 +681,15 @@ def plot_crs_scatter(
         plt.close()
 
 
+def write_info_json(obs: Observation, info_json_path: Path):
+    """Write the info.json file for the observation."""
+    out = obs.info.copy()
+    for key, val in out.items():
+        if isinstance(val, float):
+            out[key] = round(val, 3)
+    info_json_path.write_text(json.dumps(out, indent=2, sort_keys=True))
+
+
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
     if obs.manvr_event is None:
@@ -713,6 +717,10 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     obc_gnd_att_deltas = get_obc_gnd_att_deltas(
         obs.obsid, q_att_obc, remote_copy=opt.remote_copy
     )
+    if obc_gnd_att_deltas is not None:
+        for key in ["d_roll50", "d_roll95", "d_roll_end"]:
+            obs.info[key] = obc_gnd_att_deltas[key]
+
     crs = get_centroid_resids(start, stop, obs.starcat, q_att_obc)
 
     plot_crs_time(crs, report_dir / "centroid_resids_time.png")
@@ -724,7 +732,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     )
 
     make_html(obs, opt)
-    info_json_path.write_text(json.dumps(obs.info, indent=2, sort_keys=True))
+    write_info_json(obs, info_json_path)
 
 
 def main(args=None):

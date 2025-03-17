@@ -88,15 +88,15 @@ Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
 {% endif %}
 
 One shot:
- Total     : {{"{:.1f}".format(obs.one_shot)}} arcsec
+ Total: {{"{:.1f}".format(obs.one_shot)}} arcsec
  Pitch, yaw: {{"{:5.1f}".format(obs.one_shot_pitch)}}, {{"{:5.1f}".format(obs.one_shot_yaw)}} arcsec
- Aber corr : {{"{:.1f}".format(obs.one_shot_aber_corrected)}} arcsec
- Aber (y,z): {{"{:5.1f}".format(obs.aber_y)}}, {{"{:5.1f}".format(obs.aber_z)}} arcsec
+ Aber (p,y): {{"{:5.1f}".format(obs.aber_y)}}, {{"{:5.1f}".format(obs.aber_z)}} arcsec
+ Total (aber corr'd): {{"{:.1f}".format(obs.one_shot_aber_corrected)}} arcsec
 
-{% if obs.dr50 > -10 %}
-Roll err:
- 50%, 95%: {{"{:.2f}".format(obs.dr50)}}, {{"{:.2f}".format(obs.dr95)}} arcsec
- End: {{"{:.2f}".format(obs.roll_err_ending)}} arcsec
+{% if obs.info.d_roll50 %}
+OBC vs GND delta roll:
+ 50%, 95%: {{"{:.2f}".format(obs.info.d_roll50)}}, {{"{:.2f}".format(obs.info.d_roll95)}} arcsec
+ End: {{"{:.2f}".format(obs.info.d_roll_end)}} arcsec
 {% endif %}
 
 Preceding Observation: {% if obs.obs_prev %}
@@ -133,13 +133,13 @@ ObsID <a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a
                 <h2>Catalog and visualization of centroid residuals</h2>
                 <table border=1 style="font-size:11px" align="center">
                     <tr>
-                        <th align='right'>SLOT</th>
+                        <th align='right'>Slot</th>
                         <th align='right'>ID</th>
-                        <th align='right'>TYPE</th>
-                        <th align='right'>MAG</th>
-                        <th align='right'>YANG</th>
-                        <th align='right'>ZANG</th>
-                        <th align='right'>Med MAG</th>
+                        <th align='right'>Type</th>
+                        <th align='right'>Mag</th>
+                        <th align='right'>Yang</th>
+                        <th align='right'>Zang</th>
+                        <th align='right'>Med Mag</th>
                         <th align='right'>Med DY</th>
                         <th align='right'>Med DZ</th>
                     </tr>
@@ -157,7 +157,6 @@ ObsID <a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a
                     </tr>
                     {% endfor %}
                 </table>
-
                 <img src="centroid_resids_scatter.png" width="490">
             </div>
         </div>
