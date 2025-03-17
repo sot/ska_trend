@@ -180,9 +180,9 @@ ObsID <a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a
                         <td align='right'>{{"{:.2f}".format(row["mag"])}}</td>
                         <td align='right'>{{"{:.2f}".format(row["yang"])}}</td>
                         <td align='right'>{{"{:.2f}".format(row["zang"])}}</td>
-                        <td align='right'>{{"{:.3f}".format(row["median_mag"])}}</td>
-                        <td align='right'>{{"{:.2f}".format(row["median_dy"])}}</td>
-                        <td align='right'>{{"{:.2f}".format(row["median_dz"])}}</td>
+                        <td align='right'>{{"{:.3f}".format(row["mag_median"])}}</td>
+                        <td align='right'>{{"{:.2f}".format(row["dyag_median"])}}</td>
+                        <td align='right'>{{"{:.2f}".format(row["dzag_median"])}}</td>
                     </tr>
                     {% endfor %}
                 </table>

@@ -247,11 +247,7 @@ class Observation(razl.observations.Observation):
 
     @functools.cached_property
     def starcat_summary(self):
-        summary = self.starcat.copy()
-        summary["median_mag"] = 0.0
-        summary["median_dy"] = 0.0
-        summary["median_dz"] = 0.0
-        return summary
+        return self.starcat.copy()
 
 
 def processed(info_json_path: Path):
@@ -763,6 +759,24 @@ def plot_crs_scatter(
         plt.close()
 
 
+def update_starcat_summary(
+    start,
+    stop,
+    starcat: "ACATable",
+    crs: dict[int, CentroidResiduals],
+):
+    """Update starcat in place with median observed mag, dyag, dzag values."""
+    for name in ["dyag", "dzag", "mag"]:
+        starcat[f"{name}_median"] = np.nan
+
+    for entry in starcat:
+        slot = entry["slot"]
+        entry["dyag_median"] = np.median(crs[slot].dyags)
+        entry["dzag_median"] = np.median(crs[slot].dzags)
+        mags = fetch.Msid(f"aoacmag{slot}", start, stop)
+        entry["mag_median"] = np.median(mags.vals)
+
+
 def write_info_json(obs: Observation, info_json_path: Path):
     """Write the info.json file for the observation."""
     out = obs.info.copy()
@@ -814,6 +828,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         obs.starcat, crs, save_path=report_dir / "centroid_resids_scatter.png"
     )
 
+    update_starcat_summary(start, stop, obs.starcat, crs)
     make_html(obs, opt)
     write_info_json(obs, info_json_path)
 
