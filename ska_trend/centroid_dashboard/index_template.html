@@ -48,6 +48,31 @@
             display: table;
             clear: both;
         }
+
+        table.single-line {
+            border-width: medium;
+            border-spacing: 2px;
+            border-style: none;
+            border-color: gray;
+            border-collapse: collapse;
+            background-color: white;
+        }
+
+        table.single-line th {
+            border-width: 2px;
+            padding: 2px 3px 2px 3px;
+            border-style: inset;
+            border-color: gray;
+            background-color: white;
+        }
+
+        table.single-line td {
+            border-width: 2px;
+            padding: 2px 3px 2px 3px;
+            border-style: inset;
+            border-color: gray;
+            background-color: white;
+        }
     </style>
 </head>
 
@@ -90,8 +115,12 @@ Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
 One shot:
  Total: {{"{:.1f}".format(obs.one_shot)}} arcsec
  Pitch, yaw: {{"{:5.1f}".format(obs.one_shot_pitch)}}, {{"{:5.1f}".format(obs.one_shot_yaw)}} arcsec
- Aber (p,y): {{"{:5.1f}".format(obs.aber_y)}}, {{"{:5.1f}".format(obs.aber_z)}} arcsec
+ {% if obs.aber.status == "OK" %}
+ Aber (p,y): {{"{:5.1f}".format(obs.aber.y)}}, {{"{:5.1f}".format(obs.aber.z)}} arcsec
  Total (aber corr'd): {{"{:.1f}".format(obs.one_shot_aber_corrected)}} arcsec
+{% else %}
+ Aber: {{obs.aber.status}}
+{% endif %}
 
 {% if obs.info.d_roll50 %}
 OBC vs GND delta roll:
@@ -131,7 +160,7 @@ ObsID <a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a
         <div class="border" style="float: left; margin-bottom: .5cm;">
             <div id="leftsmall">
                 <h2>Catalog and visualization of centroid residuals</h2>
-                <table border=1 style="font-size:11px" align="center">
+                <table class="single-line" style="font-size:12px" align="center">
                     <tr>
                         <th align='right'>Slot</th>
                         <th align='right'>ID</th>

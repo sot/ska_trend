@@ -3,9 +3,9 @@ import copy
 import functools
 import json
 import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import subprocess
 from typing import TYPE_CHECKING, Optional
 
 import agasc
@@ -17,6 +17,7 @@ import numpy as np
 import numpy.typing as npt
 import parse_cm.paths
 import razl.observations
+from astropy.table import Table
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
 from cheta import fetch, fetch_eng
@@ -114,12 +115,16 @@ class Observation(razl.observations.Observation):
         return out
 
     @functools.cached_property
+    def aber(self) -> dict:
+        return get_aberration_correction(self.obsid, self.source)
+
+    @functools.cached_property
     def aber_y(self) -> float:
-        return 0.0
+        return self.aber["y"]
 
     @functools.cached_property
     def aber_z(self) -> float:
-        return 0.0
+        return self.aber["z"]
 
     @functools.cached_property
     def kalman_start(self) -> str:
@@ -157,7 +162,13 @@ class Observation(razl.observations.Observation):
 
     @functools.cached_property
     def one_shot_aber_corrected(self):
-        return 0.0
+        if self.aber["status"] != "OK":
+            return None
+
+        return np.hypot(
+            self.one_shot_pitch - self.aber["y"],
+            self.one_shot_yaw - self.aber["z"],
+        )
 
     @functools.cached_property
     def one_shot(self):
@@ -502,6 +513,65 @@ def get_q_att_obc(start: CxoTimeLike, stop: CxoTimeLike) -> fetch.Msid | None:
     return q_att
 
 
+def get_aberration_correction(obsid, source):
+    """
+    Get the aberration correction values for a given observation ID (obsid).
+
+    This function retrieves the aberration correction values (aber-Y and aber-Z)
+    from the ManErr.txt file located in the mission planning directory for the
+    specified obsid. If the directory or file is not found, or if there are
+    issues with the data, appropriate flags and default values are returned.
+
+    Parameters
+    ----------
+    obsid : int
+        Observation ID for which to retrieve aberration correction values.
+
+    Returns
+    -------
+    dict
+        - status (str): Status of the aberration correction retrieval:
+            - "OK": Aberration correction values successfully retrieved.
+            - "No ManErr directory": ManErr directory not found.
+            - "No ManErr files": No ManErr files found in the directory.
+            - "Multiple ManErr files": Multiple ManErr files found in the directory.
+            - "Multiple entries in ManErr": Multiple entries found for the obsid.
+        - y (float): Aberration correction for the Y-axis if found.
+        - z (float): Aberration correction for the Z-axis if found.
+    """
+    load_dir = parse_cm.paths.load_dir_from_load_name(source)
+    manerr_dir = load_dir / "output"
+
+    if not manerr_dir.exists():
+        logger.warning(f"No directory {manerr_dir}, Skipping aber correction.")
+        return {"status": "No ManErr directory"}
+
+    # Find unique ManErr file in the directory
+    manerr_files = list(manerr_dir.glob("*_ManErr.txt"))
+    if (n_files := len(manerr_files)) != 1:
+        word = "Multiple" if n_files > 1 else "No"
+        logger.warning(
+            f"{word} ManErr file(s) in {manerr_dir}, skipping aber correction."
+        )
+        return {"status": f"{word} ManErr files"}
+
+    manerr_file = manerr_files[0]
+    dat = Table.read(
+        manerr_file, format="ascii.basic", guess=False, header_start=2, data_start=3
+    )
+    ok = dat["obsid"] == obsid
+
+    if np.count_nonzero(ok) > 1:
+        logger.info(
+            f"More than one entry for {obsid} in {manerr_file}. Skipping aber correction"
+        )
+        return {"status": "Multiple entries in ManErr"}
+
+    aber_y = dat["aber-Y"][ok][0]
+    aber_z = dat["aber-Z"][ok][0]
+    return {"status": "OK", "y": aber_y, "z": aber_z}
+
+
 def plot_n_kalman_delta_roll(
     start,
     stop,
@@ -655,7 +725,7 @@ def plot_crs_scatter(
     # Use star catalog for field stars
     stars = agasc.get_stars(cat["id"])
 
-    fig, ax = plt.subplots(figsize=(5, 5))
+    fig, ax = plt.subplots(figsize=(6, 6))
     chandra_aca.plot.plot_stars(cat.att, cat, stars, ax=ax)
     colors = ["orange", "forestgreen", "steelblue", "maroon", "gray"]
 
