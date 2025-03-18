@@ -37,6 +37,9 @@ if TYPE_CHECKING:
 NDAYS_DEFAULT = 7
 SKA = Path(os.environ["SKA"])
 
+# Count of sporadic exceptions for testing. See `raise_sporadic_exc_for_testing`.
+SPORADIC_EXC_COUNT = 0
+
 logger = basic_logger("centroid_dashboard")
 
 
@@ -83,6 +86,27 @@ def get_opt():
     return parser
 
 
+def raise_sporadic_exc_for_testing():
+    """Raise a quasi-sporadic exception for testing.
+
+    A handful of calls to this function are embedded in the code to raise an exception
+    sporadically for testing purposes. The exception is raised when the environment
+    variable `CENTROID_DASHBOARD_RAISE_EXC` is set to a positive integer.
+
+    For testing the exception handling, something like this::
+
+       env CENTROID_DASHBOARD_RAISE_EXC=11 python -m ska_trend.centroid_dashboard.app \
+          --start 2025:015 --stop 2025:017  --force
+    """
+    global SPORADIC_EXC_COUNT  # noqa: PLW0603
+    if not (n_ok := os.environ.get("CENTROID_DASHBOARD_RAISE_EXC")):
+        return
+
+    SPORADIC_EXC_COUNT += 1
+    if SPORADIC_EXC_COUNT % int(n_ok) == 0:
+        raise ValueError("Sporadic exception for testing")
+
+
 @functools.lru_cache()
 def get_index_template():
     path = Path(__file__).parent / "index_template.html"
@@ -106,6 +130,7 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def manvr_event(self):
         """Provide the maneuver event leading to this observation."""
+        raise_sporadic_exc_for_testing()
         # Manvr leading to this observation. Remember the Manvr class includes the
         # maneuver and info about the dwell.
         manvr = self.manvrs[-1]
@@ -236,6 +261,7 @@ class Observation(razl.observations.Observation):
 
     @functools.cached_property
     def att_stats(self) -> dict[str, float]:
+        raise_sporadic_exc_for_testing()
         if self.att_deltas:
             out = {
                 "d_roll50": np.percentile(np.abs(self.att_deltas["d_roll"]), 50),
@@ -324,6 +350,7 @@ def get_gnd_atts(
             logger.warning("Could not copy remote aspect solution data")
             return [], []
 
+    raise_sporadic_exc_for_testing()
     atts, atts_times, _ = asp_l1.get_atts(obsid=obsid)
 
     return atts, atts_times
@@ -445,6 +472,7 @@ def get_observations(
 
 def make_html(obs: Observation, traceback=None):
     """Make the HTML file for the observation."""
+    raise_sporadic_exc_for_testing()
     logger.debug(f"Making HTML for observation {obs.obsid}")
     # Get the template from index_template.html
     env = Environment(trim_blocks=True, lstrip_blocks=True)
