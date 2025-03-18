@@ -181,15 +181,7 @@ class Observation(razl.observations.Observation):
             "one_shot",
             "roll_err_prev",
         ]
-        out = {}
-        for attr in attrs:
-            if "." in attr:
-                key, subkey = attr.split(".")
-                val = getattr(self, key).get(subkey)
-            else:
-                val = getattr(self, attr)
-            out[attr] = val
-
+        out = {getattr(self, attr) for attr in attrs}
         return out
 
     @functools.cached_property
@@ -911,6 +903,9 @@ def main(args=None):
                 make_html(obs, traceback=tb)
             except Exception as err:
                 logger.error(f"Error making traceback HTML for {obs.obsid}: {err}")
+
+            # Just in case, remove info file so observation is reprocessed next time.
+            (obs.report_dir / "info.json").unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
