@@ -443,7 +443,7 @@ def get_observations(
     return obss
 
 
-def make_html(obs: Observation):
+def make_html(obs: Observation, traceback=None):
     """Make the HTML file for the observation."""
     logger.debug(f"Making HTML for observation {obs.obsid}")
     # Get the template from index_template.html
@@ -452,6 +452,7 @@ def make_html(obs: Observation):
     context = {
         "MICA_PORTAL": "https://icxc.harvard.edu/mica",
         "obs": obs,
+        "traceback": traceback,  # For error pages
     }
     html = template.render(**context)
 
@@ -806,6 +807,9 @@ def write_info_json(obs: Observation, info_json_path: Path):
 
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
+    report_dir = obs.report_dir
+    report_dir.mkdir(parents=True, exist_ok=True)
+
     if obs.manvr_event is None:
         logger.info(f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping")
         return
@@ -819,9 +823,6 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     if processed(info_json_path):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
-
-    report_dir = obs.report_dir
-    report_dir.mkdir(parents=True, exist_ok=True)
 
     # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
     if obs.q_att_obc is None:
@@ -841,7 +842,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         )
 
     update_starcat_summary(start, stop, obs.starcat, crs)
-    make_html(obs, opt)
+    make_html(obs)
     write_info_json(obs, info_json_path)
 
 
@@ -876,6 +877,12 @@ def main(args=None):
 
             tb = traceback.format_exc()
             logger.error(f"Error processing {obs.obsid}:\n{tb}")
+            try:
+                # This SHOULD always work to preserve navigation and the traceback, but
+                # if it fails we'll just have to live with it.
+                make_html(obs, traceback=tb)
+            except Exception as err:
+                logger.error(f"Error making traceback HTML for {obs.obsid}: {err}")
 
 
 if __name__ == "__main__":

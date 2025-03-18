@@ -105,6 +105,7 @@
 
                 <pre>
 ObsID <a href="{{MICA_PORTAL}}/{{obs.obsid}}">{{obs.obsid}}</a>
+{% if not traceback %}  <!-- if not traceback -->
 Kalman start: {{obs.kalman_start}}
 
 Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
@@ -130,23 +131,24 @@ OBC vs GND delta roll:
 
 Prev Observation: {% if obs.obs_prev %}
 <a href="{{MICA_PORTAL}}/{{obs.obs_prev.obsid}}">{{obs.obs_prev.obsid}}</a>
-  {% if obs.obs_prev.att_stats.d_roll_end %}
- End roll error = {{"{:.2f}".format(obs.obs_prev.att_stats.d_roll_end)}} arcsec
-  {% endif %}
+{% if obs.obs_prev.att_stats.d_roll_end %}
+End roll error = {{"{:.2f}".format(obs.obs_prev.att_stats.d_roll_end)}} arcsec
+{% endif %}
 {% else %}
- None
+None
 {% endif %}
 
 Next Observation: {% if obs.obs_next %}
 <a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a>
 {% else %}
- None
+None
 {% endif %}
-                </pre>
+{% endif %}</pre> <!-- if not traceback-->
             </div>
         </div>
     </div>
 
+    {% if not traceback %} <!-- if not traceback -->
     <div class="column2">
         <div id="rightsmall" class="border"
             style="padding-top: 10px; margin-bottom: .5cm">
@@ -192,6 +194,14 @@ Next Observation: {% if obs.obs_next %}
             </div>
         </div>
     </div>
+    {% else %} <!-- if traceback-->
+    <div class="column2">
+        <div class="border" style="float: left; margin-bottom: .5cm;">
+            <pre>
+{{traceback}}</pre>
+        </div>
+    </div>
+    {% endif %} <!-- if not traceback-->
 
 </body>
 
