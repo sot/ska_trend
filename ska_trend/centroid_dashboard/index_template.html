@@ -132,7 +132,7 @@ OBC vs GND delta roll:
 Prev Observation: {% if obs.obs_prev %}
 <a href="{{MICA_PORTAL}}/{{obs.obs_prev.obsid}}">{{obs.obs_prev.obsid}}</a>
 {% if obs.obs_prev.att_stats.d_roll_end %}
-End roll error = {{"{:.2f}".format(obs.obs_prev.att_stats.d_roll_end)}} arcsec
+ End roll error = {{"{:.2f}".format(obs.obs_prev.att_stats.d_roll_end)}} arcsec
 {% endif %}
 {% else %}
 None

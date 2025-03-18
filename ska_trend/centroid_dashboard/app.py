@@ -113,11 +113,7 @@ def get_index_template():
     return path.read_text()
 
 
-@dataclass(repr=False, kw_only=True)
-class Observation(razl.observations.Observation):
-    obs_next: Optional["Observation"] = None
-    obs_prev: Optional["Observation"] = None
-
+class ReportDirMixin:
     @functools.cached_property
     def report_dir(self):
         return Path(self.opt["data_root"]) / "reports" / self.report_subdir
@@ -126,6 +122,17 @@ class Observation(razl.observations.Observation):
     def report_subdir(self):
         year = parse_cm.paths.parse_load_name(self.source)[-1]
         return Path(str(year), self.source, f"{self.obsid:05d}")
+
+
+class ObservationFromInfo(ReportDirMixin):
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+@dataclass(repr=False, kw_only=True)
+class Observation(razl.observations.Observation, ReportDirMixin):
+    obs_next: Optional["Observation"] = None
+    obs_prev: Optional["Observation"] = None
 
     @functools.cached_property
     def manvr_event(self):
@@ -169,19 +176,18 @@ class Observation(razl.observations.Observation):
     def info(self) -> str:
         attrs = [
             "obsid",
-            "aber.status",
+            "source",
             "aber",
             "att_stats",
             "date_starcat",
             "kalman_start",
             "kalman_stop",
             "manvr_angle",
-            "obsid_next",
-            "obsid_prev",
+            "obs_links",
             "one_shot",
             "roll_err_prev",
         ]
-        out = {getattr(self, attr) for attr in attrs}
+        out = {attr: getattr(self, attr) for attr in attrs}
         return out
 
     @functools.cached_property
@@ -238,12 +244,63 @@ class Observation(razl.observations.Observation):
         return angle
 
     @functools.cached_property
-    def obsid_next(self) -> int | None:
-        return self.obs_next.obsid if self.obs_next else None
+    def obs_links(self) -> dict[str, dict | None]:
+        """Get subset of previous and next observation info.
 
-    @functools.cached_property
-    def obsid_prev(self) -> int | None:
-        return self.obs_prev.obsid if self.obs_prev else None
+        This is used to create and maintain the links to the previous and next
+        observations in the HTML report along with the previous ending roll error.
+        """
+        out = {}
+        for link, obs in [("prev", self.obs_prev), ("next", self.obs_next)]:
+            out[link] = (
+                {"obsid": obs.obsid, "source": obs.source, "att_stats": obs.att_stats}
+                if obs
+                else None
+            )
+        return out
+
+    def obs_link_from_info(self, link: str) -> ObservationFromInfo | None:
+        """Get a ObservationFromInfo object or None for next or prev observation.
+
+        This uses the current obs info.json file to get the obsid and source for the
+        next or previous observation. If the info.json file for the next or previous
+        observation exists, it uses that info to create the ObservationFromInfo object.
+
+        This method called for the first and last observations in the processing to get
+        obs_next and obs_prev. It is not called for the rest of the observations in the
+        processing since they already have the prev/next obs objects.
+
+        The ObservationFromInfo object is a minimal stub that looks like an Observation.
+
+        Parameters
+        ----------
+        link : str
+            "next" or "prev"
+        """
+        # If the current obs does not have an info.json file then we have no way to
+        # get info about the prev/next obs. In this case return None. This normally
+        # happens for the last observation when processing new observations.
+        if not (info_json := self.report_dir / "info.json").exists():
+            logger.info(f"No {info_json} file found, obs=None")
+            return None
+
+        # info.json is available, so it has an "obs_links" dict with "next" and "prev"
+        # keys. Each of these can be either None (meaning not available) or a dict with
+        # obsid, source, att_stats keys. This is not common but happens if you re-run
+        # processing over the same date range.
+        info = json.loads(info_json.read_text())
+        obs_link = info["obs_links"][link]
+        if obs_link is None:
+            logger.info(f"No {link} obs info found, obs=None")
+            return None
+
+        obs = ObservationFromInfo(opt=self.opt, **obs_link)
+        if (info_json_link := obs.report_dir / "info.json").exists():
+            info_link = json.loads(info_json_link.read_text())
+            obs = ObservationFromInfo(opt=self.opt, **info_link)
+        logger.info(f"Found {link} obsid {obs.obsid}")
+
+        return obs
 
     @functools.cached_property
     def att_deltas(self) -> dict[str, npt.NDArray]:
@@ -300,7 +357,19 @@ def processed(info_json_path: Path):
     if not info_json_path.exists():
         return False
     info = json.loads(info_json_path.read_text())
-    return info["obsid_next"] is not None and info["obsid_prev"] is not None
+    # Check that info has a few key fields. Any processing exception will delete the
+    # info.json file.
+    out = (
+        info["kalman_start"]
+        and info["obs_links"]["next"]
+        and info["obs_links"]["prev"]
+        and info["one_shot"]
+        and (info["obsid"] >= 38000 or info["att_stats"])
+    )
+    # Last check requires that every OR has values of att_stats (from OBC vs GND
+    # attitude deltas). For planned OR's that do not run due to SCS-107, the att_stats
+    # will never be computed so these obsids get reprocessed every time.
+    return out
 
 
 def get_gnd_atts(
@@ -881,12 +950,13 @@ def main(args=None):
     logger.info(f"Found {len(obss)} observations")
 
     for idx, obs in enumerate(obss):
-        obs.obs_prev = obss[idx - 1] if idx > 0 else None
-        obs.obs_next = obss[idx + 1] if idx < len(obss) - 1 else None
+        logger.info(f"Processing observation {obs.obsid}")
 
-        logger.info(
-            f"Processing observation {obs.obsid} prev={obs.obsid_prev} next={obs.obsid_next}"
+        obs.obs_prev = obss[idx - 1] if idx > 0 else obs.obs_link_from_info("prev")
+        obs.obs_next = (
+            obss[idx + 1] if idx < len(obss) - 1 else obs.obs_link_from_info("next")
         )
+
         try:
             process_obs(obs, opt)
         except Exception as err:
