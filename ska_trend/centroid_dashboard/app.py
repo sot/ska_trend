@@ -141,6 +141,9 @@ class Observation(razl.observations.Observation):
             "manvr_angle",
             "obsid_next",
             "obsid_prev",
+            "obc_gnd_att_deltas.d_roll50",
+            "obc_gnd_att_deltas.d_roll95",
+            "obc_gnd_att_deltas.d_roll_end",
             "one_shot.total",
             "one_shot.pitch",
             "one_shot.yaw",
@@ -220,7 +223,7 @@ class Observation(razl.observations.Observation):
         return self.obs_prev.obsid if self.obs_prev else None
 
     @functools.cached_property
-    def obc_gnd_att_deltas(self):
+    def obc_gnd_att_deltas(self) -> dict[str]:
         return get_obc_gnd_att_deltas(
             self.obsid, self.q_att_obc, remote_copy=self.opt["remote_copy"]
         )
@@ -321,14 +324,14 @@ def get_obc_gnd_att_deltas(
 
     """
     if obsid >= 38000:
-        return None
+        return {}
 
     # Get ground attitude solution and times
     atts_gnd, atts_gnd_times = get_gnd_atts(obsid, remote_copy=remote_copy)
 
     # If data are not available `get_atts` returns empty arrays.
     if len(atts_gnd_times) == 0:
-        return None
+        return {}
 
     # Get OBC attitude solution and times
     atts_obc = q_att_obc.vals.q
@@ -339,7 +342,7 @@ def get_obc_gnd_att_deltas(
 
     # Ensure that endpoints of telemetry and ground solution are within 5 minutes
     if atts_gnd_times[-1] - tstop > 300 or atts_obc_times[-1] - tstop > 300:
-        return None
+        return {}
 
     # Trim OBC telemetry to common time range
     i0, i1 = np.searchsorted(atts_obc_times, [tstart, tstop])
@@ -593,7 +596,7 @@ def plot_n_kalman_delta_roll(
 
     fig, ax = plt.subplots(figsize=(8, 2.5))
 
-    if obc_gnd_att_deltas is not None:
+    if obc_gnd_att_deltas:
         ax2 = ax.twinx()
         color2 = "C1"
         plot_cxctime(
@@ -810,10 +813,6 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     if obs.q_att_obc is None:
         logger.info(f"ObsID {obs.obsid} has insufficient telemetry, skipping")
         return
-
-    if obs.obc_gnd_att_deltas is not None:
-        for key in ["d_roll50", "d_roll95", "d_roll_end"]:
-            obs.info[key] = obs.obc_gnd_att_deltas[key]
 
     start, stop = obs.kalman_start, obs.kalman_stop
     crs = get_centroid_resids(start, stop, obs.starcat, obs.q_att_obc)
