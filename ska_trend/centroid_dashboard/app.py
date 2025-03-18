@@ -362,7 +362,11 @@ def get_obc_gnd_att_deltas(
     return out
 
 
-def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]:
+def get_observations(
+    start: CxoTimeLike,
+    stop: CxoTimeLike,
+    opt: argparse.Namespace,
+) -> list[Observation]:
     """
     Get observations between the specified start and stop times.
 
@@ -393,7 +397,6 @@ def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]
 
     obss_razl = razl.observations.get_observations_from_cmds(
         cmds,
-        opt={"aca_kwargs": None, "raise_exc": False},
         allow_skip_first_obs=True,
     )
 
@@ -407,17 +410,13 @@ def get_observations(start: CxoTimeLike, stop: CxoTimeLike) -> list[Observation]
         obs = Observation(**kwargs)
         # In this application we only care about guide star slots
         obs.starcat = obs.starcat[np.isin(obs.starcat["type"], ["BOT", "GUI"])]
+        obs.opt.update(vars(opt))
         obss.append(obs)
         logger.info(
             f"Found observation {obs.obsid} at {obs.obs_start} with {len(obs.manvrs)} manvrs"
         )
 
     return obss
-
-
-def path_exists(path: Path | str) -> bool:
-    """Check if the path exists."""
-    return Path(path).exists()
 
 
 def make_html(obs: Observation, opt: argparse.Namespace):
@@ -839,7 +838,7 @@ def main(args=None):
     start = CxoTime(opt.start) if opt.start else stop - NDAYS_DEFAULT * u.day
     logger.info(f"Processing from {start} to {stop}")
 
-    obss = get_observations(start, stop)
+    obss = get_observations(start, stop, opt)
     logger.info(f"Found {len(obss)} observations")
 
     for idx, obs in enumerate(obss):
