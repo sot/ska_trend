@@ -30,8 +30,6 @@ from ska_helpers.logging import basic_logger
 from ska_matplotlib import plot_cxctime
 from starcheck.state_checks import calc_man_angle_for_duration
 
-from . import paths
-
 if TYPE_CHECKING:
     from proseco.catalog import ACATable
 
@@ -85,6 +83,10 @@ def get_index_template():
 class Observation(razl.observations.Observation):
     obs_next: Optional["Observation"] = None
     obs_prev: Optional["Observation"] = None
+
+    @functools.cached_property
+    def report_dir(self):
+        return Path(self.opt["data_root"]) / "reports" / self.report_subdir
 
     @functools.cached_property
     def report_subdir(self):
@@ -441,7 +443,7 @@ def make_html(obs: Observation, opt: argparse.Namespace):
     }
     html = template.render(**context)
 
-    path = paths.index_html(obs, opt.data_root)
+    path = obs.report_dir / "index.html"
     path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Writing {path}")
     path.write_text(html)
@@ -796,7 +798,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         logger.info(f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping")
         return
 
-    info_json_path = paths.info_json(obs, opt.data_root)
+    info_json_path = obs.report_dir / "info.json"
     if opt.force:
         info_json_path.unlink(missing_ok=True)
 
@@ -806,7 +808,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
 
-    report_dir = paths.report_dir(obs, opt.data_root)
+    report_dir = obs.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
     # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
