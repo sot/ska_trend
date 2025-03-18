@@ -151,9 +151,10 @@ class Observation(razl.observations.Observation):
         for attr in attrs:
             if "." in attr:
                 key, subkey = attr.split(".")
-                out[key] = getattr(self, key).get(subkey)
+                val = getattr(self, key).get(subkey)
             else:
-                out[attr] = getattr(self, attr)
+                val = getattr(self, attr)
+            out[attr] = val
 
         return out
 
@@ -217,6 +218,12 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def obsid_prev(self) -> int | None:
         return self.obs_prev.obsid if self.obs_prev else None
+
+    @functools.cached_property
+    def obc_gnd_att_deltas(self):
+        return get_obc_gnd_att_deltas(
+            self.obsid, self.q_att_obc, remote_copy=self.opt["remote_copy"]
+        )
 
     @functools.cached_property
     def q_att_obc(self) -> fetch.Msid | None:
@@ -804,19 +811,16 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         logger.info(f"ObsID {obs.obsid} has insufficient telemetry, skipping")
         return
 
-    obc_gnd_att_deltas = get_obc_gnd_att_deltas(
-        obs.obsid, obs.q_att_obc, remote_copy=opt.remote_copy
-    )
-    if obc_gnd_att_deltas is not None:
+    if obs.obc_gnd_att_deltas is not None:
         for key in ["d_roll50", "d_roll95", "d_roll_end"]:
-            obs.info[key] = obc_gnd_att_deltas[key]
+            obs.info[key] = obs.obc_gnd_att_deltas[key]
 
     start, stop = obs.kalman_start, obs.kalman_stop
     crs = get_centroid_resids(start, stop, obs.starcat, obs.q_att_obc)
 
     plot_crs_time(crs, report_dir / "centroid_resids_time.png")
     plot_n_kalman_delta_roll(
-        start, stop, obc_gnd_att_deltas, report_dir / "n_kalman_delta_roll.png"
+        start, stop, obs.obc_gnd_att_deltas, report_dir / "n_kalman_delta_roll.png"
     )
     plot_crs_scatter(
         obs.starcat, crs, save_path=report_dir / "centroid_resids_scatter.png"
