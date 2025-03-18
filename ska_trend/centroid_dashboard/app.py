@@ -443,7 +443,7 @@ def get_observations(
     return obss
 
 
-def make_html(obs: Observation, opt: argparse.Namespace):
+def make_html(obs: Observation):
     """Make the HTML file for the observation."""
     logger.debug(f"Making HTML for observation {obs.obsid}")
     # Get the template from index_template.html
