@@ -68,6 +68,16 @@ def get_opt():
         action="store_true",
     )
     parser.add_argument(
+        "--skip-plots",
+        help="Skip generating plots (default=False)",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--raise-exc",
+        help="Raise exceptions during processing for debugging (default=False)",
+        action="store_true",
+    )
+    parser.add_argument(
         "--log-level", default="INFO", help="Logging level (default=INFO)"
     )
     return parser
@@ -135,21 +145,15 @@ class Observation(razl.observations.Observation):
         attrs = [
             "obsid",
             "aber.status",
-            "aber.y",
-            "aber.z",
+            "aber",
+            "att_stats",
             "date_starcat",
             "kalman_start",
             "kalman_stop",
             "manvr_angle",
             "obsid_next",
             "obsid_prev",
-            "obc_gnd_att_deltas.d_roll50",
-            "obc_gnd_att_deltas.d_roll95",
-            "obc_gnd_att_deltas.d_roll_end",
-            "one_shot.total",
-            "one_shot.pitch",
-            "one_shot.yaw",
-            "one_shot.aber_corrected",
+            "one_shot",
             "roll_err_prev",
         ]
         out = {}
@@ -225,10 +229,22 @@ class Observation(razl.observations.Observation):
         return self.obs_prev.obsid if self.obs_prev else None
 
     @functools.cached_property
-    def obc_gnd_att_deltas(self) -> dict[str]:
+    def att_deltas(self) -> dict[str, npt.NDArray]:
         return get_obc_gnd_att_deltas(
             self.obsid, self.q_att_obc, remote_copy=self.opt["remote_copy"]
         )
+
+    @functools.cached_property
+    def att_stats(self) -> dict[str, float]:
+        if self.att_deltas:
+            out = {
+                "d_roll50": np.percentile(np.abs(self.att_deltas["d_roll"]), 50),
+                "d_roll95": np.percentile(np.abs(self.att_deltas["d_roll"]), 95),
+                "d_roll_end": self.att_deltas["d_roll"][-1],
+            }
+        else:
+            out = {}
+        return out
 
     @functools.cached_property
     def q_att_obc(self) -> fetch.Msid | None:
@@ -367,10 +383,6 @@ def get_obc_gnd_att_deltas(
         "d_pitch": dq.pitch * 3600,
         "d_yaw": dq.yaw * 3600,
     }
-    out["d_roll50"] = np.percentile(np.abs(out["d_roll"]), 50)
-    out["d_roll95"] = np.percentile(np.abs(out["d_roll"]), 95)
-    out["d_roll_end"] = out["d_roll"][-1]
-
     return out
 
 
@@ -819,13 +831,14 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     start, stop = obs.kalman_start, obs.kalman_stop
     crs = get_centroid_resids(start, stop, obs.starcat, obs.q_att_obc)
 
-    plot_crs_time(crs, report_dir / "centroid_resids_time.png")
-    plot_n_kalman_delta_roll(
-        start, stop, obs.obc_gnd_att_deltas, report_dir / "n_kalman_delta_roll.png"
-    )
-    plot_crs_scatter(
-        obs.starcat, crs, save_path=report_dir / "centroid_resids_scatter.png"
-    )
+    if not opt.skip_plots:  # for testing
+        plot_crs_time(crs, report_dir / "centroid_resids_time.png")
+        plot_n_kalman_delta_roll(
+            start, stop, obs.att_deltas, report_dir / "n_kalman_delta_roll.png"
+        )
+        plot_crs_scatter(
+            obs.starcat, crs, save_path=report_dir / "centroid_resids_scatter.png"
+        )
 
     update_starcat_summary(start, stop, obs.starcat, crs)
     make_html(obs, opt)
@@ -856,6 +869,8 @@ def main(args=None):
         try:
             process_obs(obs, opt)
         except Exception as err:
+            if opt.raise_exc:
+                raise
             logger.info(f"Error processing {obs.obsid}: {err}")
             import traceback
 

@@ -101,10 +101,10 @@
         <div class="border" style="float: left; margin-bottom: .5cm;">
 
             <div>
-                <h2>Performance Details</h2>
+                <h2>Observation Details</h2>
 
                 <pre>
-OBSID <a href="{{MICA_PORTAL}}/{{obs.obsid}}">{{obs.obsid}}</a>
+ObsID <a href="{{MICA_PORTAL}}/{{obs.obsid}}">{{obs.obsid}}</a>
 Kalman start: {{obs.kalman_start}}
 
 Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
@@ -121,24 +121,26 @@ One shot:
 {% else %}
  Aber: {{obs.aber.status}}
 {% endif %}
+{% if obs.att_stats.d_roll50 %}
 
-{% if obs.info.d_roll50 %}
 OBC vs GND delta roll:
- 50%, 95%: {{"{:.2f}".format(obs.info.d_roll50)}}, {{"{:.2f}".format(obs.info.d_roll95)}} arcsec
- End: {{"{:.2f}".format(obs.info.d_roll_end)}} arcsec
+ 50%, 95%: {{"{:.2f}".format(obs.att_stats.d_roll50)}}, {{"{:.2f}".format(obs.att_stats.d_roll95)}} arcsec
+ End: {{"{:.2f}".format(obs.att_stats.d_roll_end)}} arcsec
 {% endif %}
 
-Preceding Observation: {% if obs.obs_prev %}
-ObsID <a href="{{MICA_PORTAL}}/{{obs.obs_prev.obsid}}">{{obs.obs_prev.obsid}}</a>
-  End roll error = {{"{:.2f}".format(obs.roll_err_prev)}} arcsec
+Prev Observation: {% if obs.obs_prev %}
+<a href="{{MICA_PORTAL}}/{{obs.obs_prev.obsid}}">{{obs.obs_prev.obsid}}</a>
+  {% if obs.obs_prev.att_stats.d_roll_end %}
+ End roll error = {{"{:.2f}".format(obs.obs_prev.att_stats.d_roll_end)}} arcsec
+  {% endif %}
 {% else %}
-  None
+ None
 {% endif %}
 
 Next Observation: {% if obs.obs_next %}
-ObsID <a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a>
+<a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a>
 {% else %}
-  None
+ None
 {% endif %}
                 </pre>
             </div>
