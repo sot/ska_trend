@@ -119,14 +119,6 @@ class Observation(razl.observations.Observation):
         return get_aberration_correction(self.obsid, self.source)
 
     @functools.cached_property
-    def aber_y(self) -> float:
-        return self.aber["y"]
-
-    @functools.cached_property
-    def aber_z(self) -> float:
-        return self.aber["z"]
-
-    @functools.cached_property
     def kalman_start(self) -> str:
         """Date of start of KALMAN from telemetry."""
         return self.manvr_event.kalman_start
@@ -140,47 +132,49 @@ class Observation(razl.observations.Observation):
     def info(self) -> str:
         attrs = [
             "obsid",
-            "aber_y",
-            "aber_z",
+            "aber.status",
+            "aber.y",
+            "aber.z",
             "date_starcat",
             "kalman_start",
             "kalman_stop",
             "manvr_angle",
             "obsid_next",
             "obsid_prev",
-            "one_shot",
-            "one_shot_aber_corrected",
-            "one_shot_pitch",
-            "one_shot_yaw",
+            "one_shot.total",
+            "one_shot.pitch",
+            "one_shot.yaw",
+            "one_shot.aber_corrected",
             "roll_err_prev",
         ]
         out = {}
         for attr in attrs:
-            out[attr] = getattr(self, attr)
+            if "." in attr:
+                key, subkey = attr.split(".")
+                out[key] = getattr(self, key).get(subkey)
+            else:
+                out[attr] = getattr(self, attr)
 
         return out
 
     @functools.cached_property
-    def one_shot_aber_corrected(self):
-        if self.aber["status"] != "OK":
-            return None
-
-        return np.hypot(
-            self.one_shot_pitch - self.aber["y"],
-            self.one_shot_yaw - self.aber["z"],
+    def one_shot(self) -> dict[str]:
+        manvr_event = self.manvr_event
+        aber_corrected = (
+            np.hypot(
+                manvr_event.one_shot_pitch - self.aber["y"],
+                manvr_event.one_shot_yaw - self.aber["z"],
+            )
+            if self.aber["status"] == "OK"
+            else None
         )
 
-    @functools.cached_property
-    def one_shot(self):
-        return self.manvr_event.one_shot
-
-    @functools.cached_property
-    def one_shot_pitch(self):
-        return self.manvr_event.one_shot_pitch
-
-    @functools.cached_property
-    def one_shot_yaw(self):
-        return self.manvr_event.one_shot_yaw
+        return {
+            "total": manvr_event.one_shot,
+            "pitch": manvr_event.one_shot_pitch,
+            "yaw": manvr_event.one_shot_yaw,
+            "aber_corrected": aber_corrected,
+        }
 
     @functools.cached_property
     def manvr_angles(self):
@@ -284,9 +278,6 @@ def get_gnd_atts(
     tuple
         Tuple of ground attitude quaternions (Nx4) and times (N).
     """
-    if obsid >= 38000:
-        return None
-
     obsid_str = f"{obsid:05d}"
     obs2_dir = f"data/mica/archive/asp1/{obsid_str[:2]}"
     obs2_dir_local = SKA / obs2_dir
@@ -294,12 +285,15 @@ def get_gnd_atts(
     obsid_dir_local = obs2_dir_local / obsid_str
 
     if not obsid_dir_local.exists():
-        if remote_copy:
-            obs2_dir_local.mkdir(parents=True, exist_ok=True)
-            cmds = ["rsync", "-av", obsid_dir_remote, f"{obs2_dir_local}/"]
-            logger.info(f"Copying remote data with command: {' '.join(cmds)}")
-            subprocess.check_call(cmds)
-        else:
+        if not remote_copy:
+            return [], []
+
+        obs2_dir_local.mkdir(parents=True, exist_ok=True)
+        cmds = ["rsync", "-av", obsid_dir_remote, f"{obs2_dir_local}/"]
+        logger.info(f"Copying remote data with command: {' '.join(cmds)}")
+        completed_process = subprocess.run(cmds, check=False)
+        if completed_process.returncode != 0:
+            logger.warning("Could not copy remote aspect solution data")
             return [], []
 
     atts, atts_times, _ = asp_l1.get_atts(obsid=obsid)
@@ -489,7 +483,7 @@ def get_centroid_resids(
             crs[slot] = copy.copy(cr)
         except Exception:
             crs[slot] = None
-            print(f"Could not compute crs for slot {slot})")
+            logger.info(f"Could not compute crs for slot {slot})")
 
     return crs
 
@@ -783,6 +777,7 @@ def write_info_json(obs: Observation, info_json_path: Path):
     for key, val in out.items():
         if isinstance(val, float):
             out[key] = round(val, 3)
+    logger.info(f"Writing {info_json_path}")
     info_json_path.write_text(json.dumps(out, indent=2, sort_keys=True))
 
 
@@ -857,7 +852,7 @@ def main(args=None):
         try:
             process_obs(obs, opt)
         except Exception as err:
-            print(f"Error processing {obs.obsid}: {err}")
+            logger.info(f"Error processing {obs.obsid}: {err}")
             import traceback
 
             tb = traceback.format_exc()

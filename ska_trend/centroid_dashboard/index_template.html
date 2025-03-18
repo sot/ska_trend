@@ -113,11 +113,11 @@ Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
 {% endif %}
 
 One shot:
- Total: {{"{:.1f}".format(obs.one_shot)}} arcsec
- Pitch, yaw: {{"{:5.1f}".format(obs.one_shot_pitch)}}, {{"{:5.1f}".format(obs.one_shot_yaw)}} arcsec
+ Total: {{"{:.1f}".format(obs.one_shot.total)}} arcsec
+ Pitch, yaw: {{"{:5.1f}".format(obs.one_shot.pitch)}}, {{"{:5.1f}".format(obs.one_shot.yaw)}} arcsec
  {% if obs.aber.status == "OK" %}
  Aber (p,y): {{"{:5.1f}".format(obs.aber.y)}}, {{"{:5.1f}".format(obs.aber.z)}} arcsec
- Total (aber corr'd): {{"{:.1f}".format(obs.one_shot_aber_corrected)}} arcsec
+ Total (aber corr'd): {{"{:.1f}".format(obs.one_shot.aber_corrected)}} arcsec
 {% else %}
  Aber: {{obs.aber.status}}
 {% endif %}
