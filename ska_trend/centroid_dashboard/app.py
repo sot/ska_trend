@@ -3,6 +3,7 @@ import copy
 import functools
 import json
 import os
+import pickle
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -472,7 +473,7 @@ def get_obc_gnd_att_deltas(
 def get_observations(
     start: CxoTimeLike,
     stop: CxoTimeLike,
-    opt: argparse.Namespace,
+    opt: argparse.Namespace | None = None,
 ) -> list[Observation]:
     """
     Get observations between the specified start and stop times.
@@ -487,6 +488,8 @@ def get_observations(
         The start time for the observation retrieval.
     stop : CxoTimeLike
         The stop time for the observation retrieval.
+    opt : argparse.Namespace, optional
+        Command line options. If None, no options are used.
 
     Returns
     -------
@@ -517,7 +520,8 @@ def get_observations(
         obs = Observation(**kwargs)
         # In this application we only care about guide star slots
         obs.starcat = obs.starcat[np.isin(obs.starcat["type"], ["BOT", "GUI"])]
-        obs.opt.update(vars(opt))
+        if opt is not None:
+            obs.opt.update(vars(opt))
         obss.append(obs)
         logger.info(
             f"Found observation {obs.obsid} at {obs.obs_start} with {len(obs.manvrs)} manvrs"
@@ -889,6 +893,62 @@ def write_info_json(obs: Observation, info_json_path: Path):
     info_json_path.write_text(json.dumps(out, indent=2, sort_keys=True))
 
 
+def write_centroid_resids(crs: dict[int, CentroidResiduals], save_path: Path) -> None:
+    """Write the centroid residuals to a file.
+
+    This creates a dictionary with the slot number as the key and a dictionary with the
+    start and stop times, the number of times, and the dyags and dzags as the values.
+    The structure is::
+
+    {
+        slot: {
+            "tstart": t0,
+            "tstop": t1,
+            "n_times": n_times,
+            "dyags": dyags,
+            "dzags": dzags,
+        },
+    }
+
+    Notes:
+    - The dyags and dzags are interpolated to a common time grid based on the median
+      difference between the yag times.
+    - The times are in CXC seconds.
+    - The dyags and dzags are in arcseconds.
+    - The output is a pickle file that can be loaded later.
+    - The file is saved in the report directory for the observation.
+    - The dyags and dzags are saved as float16 to save space. The max error is around
+      0.002 arcsec.
+
+    Parameters
+    ----------
+    crs : dict
+        Dictionary of CentroidResiduals objects keyed by slot.
+    save_path : Path
+        Path to save the centroid residuals file.
+    """
+    out = {}
+    for slot, cr in crs.items():
+        t0 = max(cr.yag_times[0], cr.zag_times[0])
+        t1 = min(cr.yag_times[-1], cr.zag_times[-1])
+        ok = (cr.yag_times >= t0) & (cr.yag_times <= t1)
+        if np.count_nonzero(ok) < 4:
+            logger.warning(
+                f"Not enough points in slot {slot} to write centroid residuals"
+            )
+            continue
+        dt_median = np.median(np.diff(cr.yag_times[ok]))
+        n_times = int(np.round(t1 - t0) / dt_median) + 1
+        times = np.linspace(t0, t1, n_times)
+        info_slot = {"tstart": t0, "tstop": t1, "n_times": n_times}
+        info_slot["dyags"] = np.interp(times, cr.yag_times, cr.dyags).astype(np.float16)
+        info_slot["dzags"] = np.interp(times, cr.zag_times, cr.dzags).astype(np.float16)
+        out[slot] = info_slot
+
+    logger.info(f"Writing {save_path} with {len(out)} slots")
+    save_path.write_bytes(pickle.dumps(out))
+
+
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
     report_dir = obs.report_dir
@@ -927,6 +987,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
 
     update_starcat_summary(start, stop, obs.starcat, crs)
     make_html(obs)
+    write_centroid_resids(crs, report_dir / "centroid_resids.pkl")
     write_info_json(obs, info_json_path)
 
 
