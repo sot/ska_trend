@@ -67,7 +67,7 @@ def get_opt():
     )
     parser.add_argument(
         "--remote-copy",
-        help="Copy data from remote archive if not available locally",
+        help="Copy asp L1 data from remote archive if not available locally",
         action="store_true",
     )
     parser.add_argument(
@@ -185,7 +185,6 @@ class Observation(razl.observations.Observation, ReportDirMixin):
             "manvr_angle",
             "obs_links",
             "one_shot",
-            "roll_err_prev",
         ]
         out = {attr: getattr(self, attr) for attr in attrs}
         return out
@@ -332,10 +331,6 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         if len(out) == 0 or CxoTime(self.kalman_stop).secs - out.times[-1] > 10:
             return None
         return out
-
-    @functools.cached_property
-    def roll_err_prev(self):
-        return 0.0
 
     @functools.cached_property
     def date_starcat(self):
@@ -539,7 +534,7 @@ def make_html(obs: Observation, traceback=None):
     env = Environment(trim_blocks=True, lstrip_blocks=True)
     template = env.from_string(get_index_template())
     context = {
-        "MICA_PORTAL": "https://icxc.harvard.edu/mica",
+        "MICA_PORTAL": "https://kadi.cfa.harvard.edu/mica/",
         "obs": obs,
         "traceback": traceback,  # For error pages
     }
@@ -802,7 +797,7 @@ def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None):
             ax.legend(loc=1)
             legend = True
 
-    plt.subplots_adjust(left=0.1, right=0.95, hspace=0, bottom=0.08, top=0.98)
+    plt.subplots_adjust(left=0.1, right=0.95, hspace=0, bottom=0.10, top=0.98)
 
     if save_path:
         logger.info(f"Writing plot file {save_path}")

@@ -15,8 +15,8 @@
 
         div.border {
             background-color: white;
-            padding-left: 10px;
-            padding-right: 10px;
+            padding-left: 5px;
+            padding-right: 5px;
             padding-bottom: 5px;
             border-style: solid;
             border-width: 2px;
@@ -26,20 +26,20 @@
         /* Create three equal columns that floats next to each other */
         .column1 {
             float: left;
-            width: 320px;
-            padding: 10px;
+            width: 300px;
+            padding: 5px;
         }
 
         .column2 {
             float: left;
-            width: 680px;
-            padding: 10px;
+            width: 640px;
+            padding: 5px;
         }
 
         .column3 {
             float: left;
-            width: 520px;
-            padding: 10px;
+            width: 500px;
+            padding: 5px;
         }
 
         /* Clear floats after the columns */
@@ -104,7 +104,7 @@
                 <h2>Observation Details</h2>
 
                 <pre>
-ObsID <a href="{{MICA_PORTAL}}/{{obs.obsid}}">{{obs.obsid}}</a>
+ObsID <a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obsid}}" target="_blank">{{obs.obsid}}</a>
 {% if not traceback %}  <!-- if not traceback -->
 Kalman start: {{obs.kalman_start}}
 
@@ -130,16 +130,16 @@ OBC vs GND delta roll:
 {% endif %}
 
 Prev Observation: {% if obs.obs_prev %}
-<a href="{{MICA_PORTAL}}/{{obs.obs_prev.obsid}}">{{obs.obs_prev.obsid}}</a>
+<a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obs_prev.obsid}}" target="_blank">{{obs.obs_prev.obsid}}</a>
 {% if obs.obs_prev.att_stats.d_roll_end %}
- End roll error = {{"{:.2f}".format(obs.obs_prev.att_stats.d_roll_end)}} arcsec
+End roll error = {{"{:.2f}".format(obs.obs_prev.att_stats.d_roll_end)}} arcsec
 {% endif %}
 {% else %}
 None
 {% endif %}
 
 Next Observation: {% if obs.obs_next %}
-<a href="{{MICA_PORTAL}}/{{obs.obs_next.obsid}}">{{obs.obs_next.obsid}}</a>
+<a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obs_next.obsid}}" target="_blank">{{obs.obs_next.obsid}}</a>
 {% else %}
 None
 {% endif %}
@@ -152,18 +152,18 @@ None
     <div class="column2">
         <div id="rightsmall" class="border"
             style="padding-top: 10px; margin-bottom: .5cm">
-            <img src="n_kalman_delta_roll.png" width="635">
+            <img src="n_kalman_delta_roll.png" width="620">
         </div>
         <div id="rightsmall" class="border"
             style="padding-top: 10px; margin-bottom: .5cm">
-            <img src="centroid_resids_time.png" width="635">
+            <img src="centroid_resids_time.png" width="620">
         </div>
     </div>
 
     <div class="column3">
         <div class="border" style="float: left; margin-bottom: .5cm;">
             <div id="leftsmall">
-                <h2>Catalog and visualization of centroid residuals</h2>
+                <h2>Catalog and centroid residuals</h2>
                 <table class="single-line" style="font-size:12px" align="center">
                     <tr>
                         <th align='right'>Slot</th>
@@ -190,7 +190,7 @@ None
                     </tr>
                     {% endfor %}
                 </table>
-                <img src="centroid_resids_scatter.png" width="490">
+                <img src="centroid_resids_scatter.png" width="480">
             </div>
         </div>
     </div>
