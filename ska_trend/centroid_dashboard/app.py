@@ -992,6 +992,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     # observation has already been processed.
     if processed(info_json_path):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
+        return
 
     # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
     if obs.q_att_obc is None:
