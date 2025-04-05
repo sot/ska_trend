@@ -727,6 +727,8 @@ def plot_n_kalman_delta_roll(
         ylim = max(np.abs(ax2.get_ylim()).max(), 50)
         ax2.set_ylim(-ylim, ylim)
         ax2.tick_params(axis="y", labelcolor=color2)
+    else:
+        logger.info("No OBC - GND deltas available, not plotting")
 
     # The Kalman vals are strings, so use raw_vals.
     color1 = "k"
@@ -979,11 +981,6 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     report_dir = obs.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    if obs.manvr_event is None:
-        raise SkipObservation(
-            f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping"
-        )
-
     info_json_path = obs.report_dir / "info.json"
     if opt.force:
         info_json_path.unlink(missing_ok=True)
@@ -993,6 +990,11 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     if processed(info_json_path):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
+
+    if obs.manvr_event is None:
+        raise SkipObservation(
+            f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping"
+        )
 
     # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
     if obs.q_att_obc is None:
