@@ -122,11 +122,15 @@ One shot:
 {% else %}
  Aber: {{obs.aber.status}}
 {% endif %}
-{% if obs.att_stats.d_roll50 %}
+{% if obs.obsid < 38000 %}
 
 OBC vs GND delta roll:
+{% if obs.att_stats %}
  50%, 95%: {{"{:.2f}".format(obs.att_stats.d_roll50)}}, {{"{:.2f}".format(obs.att_stats.d_roll95)}} arcsec
  End: {{"{:.2f}".format(obs.att_stats.d_roll_end)}} arcsec
+{% else %}
+ Pending Aspect L1 data
+{% endif %}
 {% endif %}
 
 Prev Observation: {% if obs.obs_prev %}
