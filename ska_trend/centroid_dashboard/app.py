@@ -166,11 +166,15 @@ class Observation(razl.observations.Observation, ReportDirMixin):
     @functools.cached_property
     def kalman_start(self) -> str:
         """Date of start of KALMAN from telemetry."""
+        if self.manvr_event is None:
+            raise ValueError("manvr_event is None")
         return self.manvr_event.kalman_start
 
     @functools.cached_property
     def kalman_stop(self) -> str:
         """Date of stop of KALMAN from telemetry."""
+        if self.manvr_event is None:
+            raise ValueError("manvr_event is None")
         return self.manvr_event.npnt_stop
 
     @functools.cached_property
@@ -191,8 +195,10 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         return out
 
     @functools.cached_property
-    def one_shot(self) -> dict[str]:
-        manvr_event = self.manvr_event
+    def one_shot(self) -> dict[str] | None:
+        if (manvr_event := self.manvr_event) is None:
+            return None
+
         aber_corrected = (
             np.hypot(
                 manvr_event.one_shot_pitch - self.aber["y"],
@@ -252,11 +258,13 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         """
         out = {}
         for link, obs in [("prev", self.obs_prev), ("next", self.obs_next)]:
-            out[link] = (
-                {"obsid": obs.obsid, "source": obs.source, "att_stats": obs.att_stats}
-                if obs
-                else None
-            )
+            if obs is None:
+                out[link] = None
+            else:
+                out[link] = {"obsid": obs.obsid, "source": obs.source}
+                if link == "prev":
+                    out[link]["att_stats"] = obs.att_stats
+
         return out
 
     def obs_link_from_info(self, link: str) -> ObservationFromInfo | None:
@@ -303,10 +311,11 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         return obs
 
     @functools.cached_property
-    def att_deltas(self) -> dict[str, npt.NDArray]:
-        return get_obc_gnd_att_deltas(
+    def att_deltas(self) -> dict[str, npt.NDArray] | None:
+        out = get_obc_gnd_att_deltas(
             self.obsid, self.q_att_obc, remote_copy=self.opt["remote_copy"]
         )
+        return out
 
     @functools.cached_property
     def att_stats(self) -> dict[str, float]:
@@ -323,6 +332,10 @@ class Observation(razl.observations.Observation, ReportDirMixin):
 
     @functools.cached_property
     def q_att_obc(self) -> fetch.Msid | None:
+        # Need manvr_event for kalman_start and kalman_stop
+        if self.manvr_event is None:
+            return None
+
         try:
             out = fetch.Msid("quat_aoattqt", self.kalman_start, self.kalman_stop)
         except IndexError:
@@ -414,8 +427,8 @@ def get_gnd_atts(
 
 
 def get_obc_gnd_att_deltas(
-    obsid: int, q_att_obc: fetch.Msid, remote_copy: bool = False
-) -> dict[str]:
+    obsid: int, q_att_obc: fetch.Msid | None, remote_copy: bool = False
+) -> dict[str] | None:
     """
     Get OBC pitch, yaw, roll errors with respect to the ground aspect solution.
 
@@ -425,15 +438,15 @@ def get_obc_gnd_att_deltas(
         Observation ID. If obsid >= 38000, return None.
 
     """
-    if obsid >= 38000:
-        return {}
+    if obsid >= 38000 or q_att_obc is None:
+        return None
 
     # Get ground attitude solution and times
     atts_gnd, atts_gnd_times = get_gnd_atts(obsid, remote_copy=remote_copy)
 
     # If data are not available `get_atts` returns empty arrays.
     if len(atts_gnd_times) == 0:
-        return {}
+        return None
 
     # Get OBC attitude solution and times
     atts_obc = q_att_obc.vals.q
@@ -444,7 +457,7 @@ def get_obc_gnd_att_deltas(
 
     # Ensure that endpoints of telemetry and ground solution are within 5 minutes
     if atts_gnd_times[-1] - tstop > 300 or atts_obc_times[-1] - tstop > 300:
-        return {}
+        return None
 
     # Trim OBC telemetry to common time range
     i0, i1 = np.searchsorted(atts_obc_times, [tstart, tstop])
@@ -949,14 +962,27 @@ def write_centroid_resids(crs: dict[int, CentroidResiduals], save_path: Path) ->
     save_path.write_bytes(pickle.dumps(out))
 
 
+class SkipObservation(Exception):
+    """Skip observation exception.
+
+    This is used to skip observations that have already been processed or have no
+    telemetry.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        logger.info(message)
+
+
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
     report_dir = obs.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
     if obs.manvr_event is None:
-        logger.info(f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping")
-        return
+        raise SkipObservation(
+            f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping"
+        )
 
     info_json_path = obs.report_dir / "info.json"
     if opt.force:
@@ -966,12 +992,10 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     # observation has already been processed.
     if processed(info_json_path):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
-        return
 
     # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
     if obs.q_att_obc is None:
-        logger.info(f"ObsID {obs.obsid} has insufficient telemetry, skipping")
-        return
+        raise SkipObservation(f"ObsID {obs.obsid} has insufficient telemetry, skipping")
 
     start, stop = obs.kalman_start, obs.kalman_stop
     crs = get_centroid_resids(start, stop, obs.starcat, obs.q_att_obc)
@@ -1006,7 +1030,9 @@ def main(args=None):
     logger.info(f"Found {len(obss)} observations")
 
     for idx, obs in enumerate(obss):
+        logger.info("*" * 80)
         logger.info(f"Processing observation {obs.obsid}")
+        logger.info("*" * 80)
 
         obs.obs_prev = obss[idx - 1] if idx > 0 else obs.obs_link_from_info("prev")
         obs.obs_next = (
@@ -1015,6 +1041,14 @@ def main(args=None):
 
         try:
             process_obs(obs, opt)
+
+        except SkipObservation as err:
+            try:
+                make_html(obs, traceback=str(err))
+            except Exception as err:
+                logger.error(f"Error making traceback HTML for {obs.obsid}: {err}")
+            (obs.report_dir / "info.json").unlink(missing_ok=True)
+
         except Exception as err:
             if opt.raise_exc:
                 raise
@@ -1032,6 +1066,8 @@ def main(args=None):
 
             # Just in case, remove info file so observation is reprocessed next time.
             (obs.report_dir / "info.json").unlink(missing_ok=True)
+
+        logger.info("")
 
 
 if __name__ == "__main__":
