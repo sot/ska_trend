@@ -104,9 +104,14 @@
                 <h2>Observation Details</h2>
 
                 <pre>
-ObsID <a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obsid}}" target="_blank">{{obs.obsid}}</a>
+ObsID <a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obsid}}&load_name={{obs.source}}" target="_blank">{{obs.obsid}}</a>
+Source <a href="../../{{obs.source}}">{{obs.source}}</a>
 {% if not traceback %}  <!-- if not traceback -->
-Kalman start: {{obs.kalman_start}}
+Kalman start: {{obs.kalman_start.date}}
+{{obs.kalman_start.get_conversions()["local"]}}
+Duration: {{"{:.0f}".format((obs.kalman_stop - obs.kalman_start).sec)}} sec
+
+T_ccd (mean, max): {{"{:.1f}".format(obs.t_ccd_mean)}}, {{"{:.1f}".format(obs.t_ccd_max)}} C
 
 Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
 {% if obs.manvr_angles_text %}

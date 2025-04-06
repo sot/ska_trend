@@ -21,7 +21,7 @@ import razl.observations
 from astropy.table import Table
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
-from cheta import fetch, fetch_eng
+from cheta import fetch, fetch_eng, fetch_sci
 from cxotime import CxoTime, CxoTimeLike
 from jinja2 import Environment
 from matplotlib import pyplot as plt
@@ -164,18 +164,18 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         return get_aberration_correction(self.obsid, self.source)
 
     @functools.cached_property
-    def kalman_start(self) -> str:
+    def kalman_start(self) -> CxoTime:
         """Date of start of KALMAN from telemetry."""
         if self.manvr_event is None:
             raise ValueError("manvr_event is None")
-        return self.manvr_event.kalman_start
+        return CxoTime(self.manvr_event.kalman_start)
 
     @functools.cached_property
-    def kalman_stop(self) -> str:
+    def kalman_stop(self) -> CxoTime:
         """Date of stop of KALMAN from telemetry."""
         if self.manvr_event is None:
             raise ValueError("manvr_event is None")
-        return self.manvr_event.npnt_stop
+        return CxoTime(self.manvr_event.npnt_stop)
 
     @functools.cached_property
     def info(self) -> str:
@@ -184,14 +184,14 @@ class Observation(razl.observations.Observation, ReportDirMixin):
             "source",
             "aber",
             "att_stats",
-            "date_starcat",
-            "kalman_start",
-            "kalman_stop",
             "manvr_angle",
             "obs_links",
             "one_shot",
         ]
         out = {attr: getattr(self, attr) for attr in attrs}
+        for attr in ["date_starcat", "kalman_start", "kalman_stop"]:
+            out[attr] = getattr(self, attr).date
+
         return out
 
     @functools.cached_property
@@ -331,6 +331,31 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         return out
 
     @functools.cached_property
+    def aacccdpt_msid(self) -> fetch.Msid | None:
+        if self.manvr_event is None:
+            return None
+        out = fetch_sci.Msid("aacccdpt", self.kalman_start, self.kalman_stop)
+        return out
+
+    @functools.cached_property
+    def t_ccd_mean(self) -> float | None:
+        """Mean temperature of the CCDs during the observation."""
+        if self.aacccdpt_msid is None:
+            return None
+        # Get the mean temperature over the observation period
+        t_ccd = np.mean(self.aacccdpt_msid.vals)
+        return t_ccd
+
+    @functools.cached_property
+    def t_ccd_max(self) -> float | None:
+        """Max temperature of the CCDs during the observation."""
+        if self.aacccdpt_msid is None:
+            return None
+        # Get the max temperature over the observation period
+        t_ccd = np.max(self.aacccdpt_msid.vals)
+        return t_ccd
+
+    @functools.cached_property
     def q_att_obc(self) -> fetch.Msid | None:
         # Need manvr_event for kalman_start and kalman_stop
         if self.manvr_event is None:
@@ -342,14 +367,14 @@ class Observation(razl.observations.Observation, ReportDirMixin):
             # No telemetry unfortunately raises IndexError instead of zero-length Msid
             return None
         # Enough data and sampling to end of observation
-        if len(out) == 0 or CxoTime(self.kalman_stop).secs - out.times[-1] > 10:
+        if len(out) == 0 or self.kalman_stop.secs - out.times[-1] > 10:
             return None
         return out
 
     @functools.cached_property
-    def date_starcat(self):
+    def date_starcat(self) -> CxoTime:
         """Date of MP_STARCAT command"""
-        return self.starcat.date
+        return CxoTime(self.starcat.date)
 
     @functools.cached_property
     def starcat_summary(self):
@@ -724,8 +749,9 @@ def plot_n_kalman_delta_roll(
             ax=ax2,
         )
         ax2.set_ylabel("OBC - GND d_roll (arcsec)", color=color2)
-        ylim = max(np.abs(ax2.get_ylim()).max(), 50)
-        ax2.set_ylim(-ylim, ylim)
+        ax2.set_ylim(-100, 100)
+        ax2.set_yticks([-100, -75, -50, -25, 0, 25, 50, 75, 100])
+        ax2.axhline(0, color=color2, lw=2, linestyle=":")
         ax2.tick_params(axis="y", labelcolor=color2)
     else:
         logger.info("No OBC - GND deltas available, not plotting")
@@ -738,7 +764,7 @@ def plot_n_kalman_delta_roll(
 
     # Draw a line to indicate 1 ksec
     t0 = n_kalman.times[0]
-    plot_cxctime([t0, t0 + 1000], [0.5, 0.5], lw=3, color="orange", ax=ax)
+    plot_cxctime([t0, t0 + 1000], [0.5, 0.5], lw=2, color="red", ax=ax)
     ax.text(CxoTime(t0).plot_date, 0.7, "1 ksec")
 
     ax.grid(ls=":")
@@ -800,13 +826,8 @@ def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None):
                 )
 
         ax.grid(ls=":")
-        ylims = ax.get_ylim()
-        if max(np.abs(ylims)) < 5:
-            ax.set_ylim(-6, 6)
-            ax.set_yticks([-5, 0, 5], ["-5", "0", "5"])
-        else:
-            ax.set_ylim(-12, 12)
-            ax.set_yticks([-10, -5, 0, 5, 10], ["-10", "-5", "0", "5", "10"])
+        ax.set_ylim(-8, 8)
+        ax.set_yticks([-5, 0, 5], ["-5", "0", "5"])
         ax.set_xlabel("Time (sec)")
         ax.set_ylabel(f"Slot {slot}\n(arcsec)")
 
