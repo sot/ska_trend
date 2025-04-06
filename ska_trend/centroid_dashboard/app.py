@@ -142,9 +142,7 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         # Manvr leading to this observation. Remember the Manvr class includes the
         # maneuver and info about the dwell.
         manvr = self.manvrs[-1]
-        start = manvr.start - 1 * u.min
-        stop = manvr.stop + 5 * u.min
-        manvrs = ke.manvrs.filter(start, stop)
+        manvrs = ke.manvrs.filter(manvr.start, manvr.stop)
         if len(manvrs) == 0:
             # Most commonly because telemetry does not include this maneuver yet.
             out = None
