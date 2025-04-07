@@ -137,7 +137,7 @@ class Observation(razl.observations.Observation, ReportDirMixin):
 
     @functools.cached_property
     def manvr_event(self):
-        """Provide the maneuver event leading to this observation."""
+        """Provide the kadi maneuver event leading to this observation."""
         raise_sporadic_exc_for_testing()
         # Manvr leading to this observation. Remember the Manvr class includes the
         # maneuver and info about the dwell.
@@ -149,7 +149,7 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         elif len(manvrs) > 2:
             # Should never have 3 or more manvrs in a row.
             raise ValueError(
-                f"Multiple manvrs found between {start} and {stop}:\n{manvrs}"
+                f"Multiple manvrs found between {manvr.start} and {manvr.stop}:\n{manvrs}"
             )
         else:
             # Take the last maneuver before the observation. Segmented maneuvers or
@@ -554,6 +554,11 @@ def get_observations(
             for k in razl.observations.Observation.__annotations__
         }
         obs = Observation(**kwargs)
+
+        # Ignore intermediate attitude observations without a star catalog
+        if obs.starcat is None:
+            continue
+
         # In this application we only care about guide star slots
         obs.starcat = obs.starcat[np.isin(obs.starcat["type"], ["BOT", "GUI"])]
         if opt is not None:
@@ -711,7 +716,12 @@ def get_aberration_correction(obsid, source):
     )
     ok = dat["obsid"] == obsid
 
-    if np.count_nonzero(ok) > 1:
+    if (n_ok := np.count_nonzero(ok)) == 0:
+        logger.warning(
+            f"No entry for {obsid} in {manerr_file}. Skipping aber correction"
+        )
+        return {"status": "No entry in ManErr"}
+    elif n_ok > 1:
         logger.info(
             f"More than one entry for {obsid} in {manerr_file}. Skipping aber correction"
         )
