@@ -19,6 +19,7 @@ import numpy as np
 import numpy.typing as npt
 import parse_cm.paths
 import razl.observations
+import ska_helpers.utils
 from astropy.table import Table
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
@@ -465,7 +466,9 @@ def get_gnd_atts(
             return [], []
 
         for path in obsid_dir_local.glob("*_asol1.fits.gz"):
-            logger.info(f"Overwriting existing file {path} with only time, q_att_raw cols")
+            logger.info(
+                f"Overwriting existing file {path} with only time, q_att_raw cols"
+            )
             dat = Table.read(path)
             dat = dat["time", "q_att_raw"]
             dat.write(path, overwrite=True)
@@ -1115,7 +1118,12 @@ def main(args=None):
         )
 
         try:
-            process_obs(obs, opt)
+            # Need to use full AGASC not proseco_agasc for processing observations prior
+            # to current version.
+            with ska_helpers.utils.temp_env_var(
+                "AGASC_HDF5_FILE", agasc.get_agasc_filename("agasc*")
+            ):
+                process_obs(obs, opt)
 
         except SkipObservation as err:
             try:
