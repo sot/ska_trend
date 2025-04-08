@@ -46,7 +46,6 @@ logger = basic_logger("centroid_dashboard")
 
 def get_opt():
     parser = argparse.ArgumentParser(description="Centroid dashboard")
-    parser.add_argument("--obsid", help="Processing obsid (default=None)")
     parser.add_argument(
         "--start",
         help=f"Processing start date (default=stop - {NDAYS_DEFAULT} days)",
@@ -75,6 +74,12 @@ def get_opt():
         "--skip-plots",
         help="Skip generating plots (default=False)",
         action="store_true",
+    )
+    # Add obsid argument for optional single obsid to process
+    parser.add_argument(
+        "--obsid",
+        type=int,
+        help="Observation ID to process (default=all), still need start/stop times.",
     )
     parser.add_argument(
         "--raise-exc",
@@ -1007,6 +1012,10 @@ class SkipObservation(Exception):
 
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
+    if opt.obsid and obs.obsid != opt.obsid:
+        logger.info(f"ObsID {obs.obsid} does not match requested obsid {opt.obsid}")
+        return
+
     report_dir = obs.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
