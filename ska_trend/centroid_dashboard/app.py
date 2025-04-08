@@ -667,9 +667,9 @@ def get_centroid_resids(
             cr.set_centroids("obc", slot=slot)
             cr.set_star(agasc_id=agasc_id)
             cr.calc_residuals()
-            crs[slot] = copy.copy(cr)
+            if len(cr.yag_times) > 10:
+                crs[slot] = copy.copy(cr)
         except Exception:
-            crs[slot] = None
             logger.info(f"Could not compute crs for slot {slot})")
 
     return crs
@@ -925,6 +925,9 @@ def plot_crs_scatter(
         yag = entry["yang"]
         zag = entry["zang"]
         slot = entry["slot"]
+        # Skip if no centroid residuals
+        if slot not in crs:
+            continue
         row, col = yagzag_to_pixels(yag, zag)
         # 1 px -> factor px; 5 arcsec = 5 * factor arcsec
         # Minus sign for y-coord to reflect sign flip in the pixel
@@ -955,6 +958,8 @@ def update_starcat_summary(
 
     for entry in starcat:
         slot = entry["slot"]
+        if slot not in crs:
+            continue
         entry["dyag_median"] = np.median(crs[slot].dyags)
         entry["dzag_median"] = np.median(crs[slot].dzags)
         mags = fetch.Msid(f"aoacmag{slot}", start, stop)
