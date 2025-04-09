@@ -225,7 +225,7 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         angles = []
         for manvr in self.manvrs:
             dq = manvr.att_stop.dq(manvr.att_start)
-            angles.append(np.rad2deg(np.arccos(dq.q[3]) * 2))
+            angles.append(np.rad2deg(np.arccos(np.clip(dq.q[3], 0.0, 1.0)) * 2))
         return angles
 
     @functools.cached_property
@@ -1027,8 +1027,22 @@ def write_centroid_resids(crs: dict[int, CentroidResiduals], save_path: Path) ->
         n_times = int(np.round(t1 - t0) / dt_median) + 1
         times = np.linspace(t0, t1, n_times)
         info_slot = {"tstart": t0, "tstop": t1, "n_times": n_times}
-        info_slot["dyags"] = np.interp(times, cr.yag_times, cr.dyags).astype(np.float16)
-        info_slot["dzags"] = np.interp(times, cr.zag_times, cr.dzags).astype(np.float16)
+
+        # It can happen that the dyag/zag values are large (> 65500) and overflow the
+        # float16 type. This is not common, but we clip the values and log the info if
+        # there are overflows.
+        max16 = np.finfo(np.float16).max  # symmetric with min
+        for ax in ["yag", "zag"]:
+            attr_vals = f"d{ax}s"
+            attr_times = f"{ax}_times"
+            dyzs = getattr(cr, attr_vals)
+            overflow = np.abs(dyzs) > max16
+            if (n_overflow := np.count_nonzero(overflow)) > 0:
+                logger.info(f"Overflow in {n_overflow} d{ax} values for slot {slot}")
+            dyzs = dyzs.clip(-max16, max16)
+            dyz_times = getattr(cr, attr_times)
+            info_slot[attr_vals] = np.interp(times, dyz_times, dyzs).astype(np.float16)
+
         out[slot] = info_slot
 
     logger.info(f"Writing {save_path} with {len(out)} slots")
