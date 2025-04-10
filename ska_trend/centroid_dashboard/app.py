@@ -63,21 +63,20 @@ def get_opt():
         help="Root directory for data files (default=.)",
     )
     parser.add_argument(
-        "--force",
-        help="Force processing even if data exists",
-        action="store_true",
+        "--remove",
+        action="append",
+        default=[],
+        dest="removes",
+        help=(
+            "Remove files matching glob pattern before processing "
+            "(can be specified multiple times)"
+        ),
     )
     parser.add_argument(
         "--remote-copy",
         help="Copy asp L1 data from remote archive if not available locally",
         action="store_true",
     )
-    parser.add_argument(
-        "--skip-plots",
-        help="Skip generating plots (default=False)",
-        action="store_true",
-    )
-    # Add obsid argument for optional single obsid to process
     parser.add_argument(
         "--obsid",
         type=int,
@@ -132,6 +131,55 @@ class ReportDirMixin:
         return Path(str(year), self.source, f"{self.obsid:05d}")
 
 
+@dataclass
+class CentroidResidualsLite:
+    """Lite version of CentroidResiduals.
+
+    This provides the attributes that are needed for processing in this application and
+    are available in the centroid residuals file.
+    """
+
+    dyags: npt.NDArray
+    dzags: npt.NDArray
+    yag_times: npt.NDArray
+    zag_times: npt.NDArray
+
+
+class PathsBase:
+    def __init_subclass__(cls) -> None:
+        def create_property(self, name):
+            return self._report_dir / name
+
+        for name in cls._names:
+            func = functools.partial(create_property, name=name)
+            setattr(
+                cls,
+                name.replace(".", "_"),
+                property(func),
+            )
+
+
+class Paths(PathsBase):
+    _names = [
+        "centroid_resids_time.png",
+        "n_kalman_delta_roll.png",
+        "has_gnd_att",
+        "centroid_resids_scatter.png",
+        "centroid_resids.pkl",
+        "index.html",
+        "info.json",
+    ]
+
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+
+        self._report_dir = obj.report_dir
+        return self
+
+    def __set__(self, obj, value): ...
+
+
 class ObservationFromInfo(ReportDirMixin):
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
@@ -141,6 +189,7 @@ class ObservationFromInfo(ReportDirMixin):
 class Observation(razl.observations.Observation, ReportDirMixin):
     obs_next: Optional["Observation"] = None
     obs_prev: Optional["Observation"] = None
+    path: Paths = Paths()
 
     @functools.cached_property
     def manvr_event(self):
@@ -150,18 +199,20 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         # maneuver and info about the dwell.
         manvr = self.manvrs[-1]
         manvrs = ke.manvrs.filter(manvr.start, manvr.stop)
-        if len(manvrs) == 0:
+        if (n_manvrs := len(manvrs)) == 0:
             # Most commonly because telemetry does not include this maneuver yet.
             out = None
-        elif len(manvrs) > 2:
-            # Should never have 3 or more manvrs in a row.
-            raise ValueError(
-                f"Multiple manvrs found between {manvr.start} and {manvr.stop}:\n{manvrs}"
-            )
+
         else:
             # Take the last maneuver before the observation. Segmented maneuvers or
             # the high-IR zone dwell are common cases of 2 manvrs.
-            out = manvrs[len(manvrs) - 1]  # Negative indexing not supported
+            out = manvrs[n_manvrs - 1]  # Negative indexing not supported
+            if n_manvrs > 2:
+                # Having 3 or more manvrs in a row is unusual.
+                logger.warning(
+                    f"Warning - found {n_manvrs} manvrs found between "
+                    f"{manvr.start} and {manvr.stop}:\n{manvrs}"
+                )
         return out
 
     @functools.cached_property
@@ -608,9 +659,10 @@ def get_observations(
     return obss
 
 
-def make_html(obs: Observation, traceback=None):
+def write_index_html(obs: Observation, save_path: Path, traceback=None):
     """Make the HTML file for the observation."""
     raise_sporadic_exc_for_testing()
+
     logger.debug(f"Making HTML for observation {obs.obsid}")
     # Get the template from index_template.html
     env = Environment(trim_blocks=True, lstrip_blocks=True)
@@ -622,10 +674,39 @@ def make_html(obs: Observation, traceback=None):
     }
     html = template.render(**context)
 
-    path = obs.report_dir / "index.html"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Writing {path}")
-    path.write_text(html)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Writing {save_path}")
+    save_path.write_text(html)
+
+
+def get_centroid_resids_from_file(
+    crs_path: Path,
+) -> dict[int, CentroidResidualsLite] | None:
+    """Get centroid residuals from the file.
+
+    See ``write_centroid_resids()`` for the format of the file.
+
+    Parameters
+    ----------
+    crs_path : Path
+        Path to the centroid residuals file.
+
+    Returns
+    -------
+    dict | None
+        Dictionary of CentroidResidualsLite objects keyed by slot, or None if the file
+        does not exist.
+    """
+    if not crs_path.exists():
+        return None
+
+    logger.info(f"Reading centroid residuals from {crs_path}")
+    vals = pickle.loads(crs_path.read_bytes())
+    out = {}
+    for slot, val in vals.items():
+        times = np.linspace(val["tstart"], val["tstop"], val["n_times"])
+        cr = CentroidResidualsLite(val["dyags"], val["dzags"], times, times)
+        out[slot] = cr
 
 
 def get_centroid_resids(
@@ -633,7 +714,8 @@ def get_centroid_resids(
     stop: CxoTimeLike,
     starcat: "ACATable",
     q_att: fetch.Msid,
-) -> dict[int, CentroidResiduals]:
+    crs_path: Path | None = None,
+) -> dict[int, CentroidResiduals | CentroidResidualsLite]:
     """
     Get OBC centroid residuals for all guide slots.
 
@@ -649,12 +731,18 @@ def get_centroid_resids(
         Star catalog table.
     q_att : fetch.Msid
         Attitude quaternion telemetry for `quat_aoattqt` MSID.
+    crs_path : Path, optional
+        Path to the centroid residuals file. If None, the centroid residuals are
+        computed from scratch.
 
     Returns
     -------
     dict
-        Dictionary of CentroidResiduals objects keyed by slot.
+        Dictionary of CentroidResiduals | CentroidResidualsLite objects keyed by slot.
     """
+    if crs := get_centroid_resids_from_file(crs_path):
+        return crs
+
     crs = {}
     cr = CentroidResiduals(start, stop)
 
@@ -672,8 +760,10 @@ def get_centroid_resids(
             cr.calc_residuals()
             if len(cr.yag_times) > 10:
                 crs[slot] = copy.copy(cr)
-        except Exception:
-            logger.info(f"Could not compute crs for slot {slot})")
+            else:
+                logger.info(f"Not enough data for slot {slot}")
+        except Exception as exc:
+            logger.info(f"Could not compute crs for slot {slot}: {exc}")
 
     return crs
 
@@ -700,6 +790,7 @@ def get_q_att_obc(start: CxoTimeLike, stop: CxoTimeLike) -> fetch.Msid | None:
     tstart = CxoTime(start).secs
     tstop = CxoTime(stop).secs
     if abs(tstart - q_att.times[0]) > 10 or abs(tstop - q_att.times[-1]) > 10:
+        logger.info("Not enough attitude telemetry for obsid")
         return None
 
     return q_att
@@ -774,10 +865,14 @@ def plot_n_kalman_delta_roll(
     stop,
     obc_gnd_att_deltas: dict[str, npt.NDArray] | None,
     save_path: Path | None = None,
-):
+) -> None:
     """
     Fetch and plot number of Kalman stars for the obsid.
     """
+    if save_path and save_path.exists():
+        logger.info("Plot file exists, skipping")
+        return
+
     n_kalman = fetch_eng.Msid("aokalstr", start, stop)
 
     fig, ax = plt.subplots(figsize=(8, 2.5))
@@ -822,7 +917,7 @@ def plot_n_kalman_delta_roll(
         plt.close()
 
 
-def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None):
+def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None) -> None:
     """
     Make png plot of OBC centroid residuals in each slot.
 
@@ -836,6 +931,9 @@ def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None):
     save_path : Path, optional
         Path to save the plot if not None.
     """
+    if save_path and save_path.exists():
+        logger.info("Plot file exists, skipping")
+        return
 
     colors = {"yag": "k", "zag": "slategray"}
 
@@ -895,7 +993,7 @@ def plot_crs_scatter(
     crs: dict[int, CentroidResiduals],
     scale: float = 20,
     save_path: Path | None = None,
-):
+) -> None:
     """
     Make visual plot of OBC centroid residuals.
 
@@ -913,6 +1011,10 @@ def plot_crs_scatter(
     save_path : Path, optional
         Path to save the plot if not None.
     """
+    if save_path and save_path.exists():
+        logger.info("Plot file exists, skipping")
+        return
+
     # Relabel idx in a copy of starcat so plot is numbered by slot.
     cat = starcat.copy()
     cat["idx"] = cat["slot"]
@@ -950,11 +1052,11 @@ def plot_crs_scatter(
 
 
 def update_starcat_summary(
-    start,
-    stop,
+    start: CxoTimeLike,
+    stop: CxoTimeLike,
     starcat: "ACATable",
     crs: dict[int, CentroidResiduals],
-):
+) -> None:
     """Update starcat in place with median observed mag, dyag, dzag values."""
     for name in ["dyag", "dzag", "mag"]:
         starcat[f"{name}_median"] = np.nan
@@ -969,7 +1071,7 @@ def update_starcat_summary(
         entry["mag_median"] = np.median(mags.vals)
 
 
-def write_info_json(obs: Observation, info_json_path: Path):
+def write_info_json(obs: Observation, info_json_path: Path) -> None:
     """Write the info.json file for the observation."""
     out = obs.info.copy()
     for key, val in out.items():
@@ -1013,6 +1115,10 @@ def write_centroid_resids(crs: dict[int, CentroidResiduals], save_path: Path) ->
     save_path : Path
         Path to save the centroid residuals file.
     """
+    if save_path.exists():
+        logger.info("Centroid residuals file exists, skipping")
+        return
+
     out = {}
     for slot, cr in crs.items():
         t0 = max(cr.yag_times[0], cr.zag_times[0])
@@ -1063,20 +1169,18 @@ class SkipObservation(Exception):
 
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
-    if opt.obsid and obs.obsid != opt.obsid:
-        logger.info(f"ObsID {obs.obsid} does not match requested obsid {opt.obsid}")
-        return
-
     report_dir = obs.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    info_json_path = obs.report_dir / "info.json"
-    if opt.force:
-        info_json_path.unlink(missing_ok=True)
+    # Allow for selective reprocessing by removing files
+    for remove in opt.removes:
+        for path in report_dir.glob(remove):
+            logger.info(f"Removing {path}")
+            path.unlink()
 
     # Skip processing if next_obsid is already in info.json. This implies that the
     # observation has already been processed.
-    if processed(info_json_path):
+    if processed(obs.path.info_json):
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
 
@@ -1090,21 +1194,22 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
         raise SkipObservation(f"ObsID {obs.obsid} has insufficient telemetry, skipping")
 
     start, stop = obs.kalman_start, obs.kalman_stop
-    crs = get_centroid_resids(start, stop, obs.starcat, obs.q_att_obc)
 
-    if not opt.skip_plots:  # for testing
-        plot_crs_time(crs, report_dir / "centroid_resids_time.png")
-        plot_n_kalman_delta_roll(
-            start, stop, obs.att_deltas, report_dir / "n_kalman_delta_roll.png"
-        )
-        plot_crs_scatter(
-            obs.starcat, crs, save_path=report_dir / "centroid_resids_scatter.png"
-        )
+    # To allow faster reprocessing (e.g. just the HTML), try reading CRs from file
+    crs = get_centroid_resids(
+        start, stop, obs.starcat, obs.q_att_obc, obs.path.centroid_resids_pkl
+    )
+    write_centroid_resids(crs, obs.path.centroid_resids_pkl)
+
+    plot_crs_time(crs, obs.path.centroid_resids_time_png)
+    plot_n_kalman_delta_roll(
+        start, stop, obs.att_deltas, obs.path.n_kalman_delta_roll_png
+    )
+    plot_crs_scatter(obs.starcat, crs, save_path=obs.path.centroid_resids_scatter_png)
 
     update_starcat_summary(start, stop, obs.starcat, crs)
-    make_html(obs)
-    write_centroid_resids(crs, report_dir / "centroid_resids.pkl")
-    write_info_json(obs, info_json_path)
+    write_index_html(obs, obs.path.index_html)
+    write_info_json(obs, obs.path.info_json)
 
 
 def main(args=None):
@@ -1122,6 +1227,9 @@ def main(args=None):
     logger.info(f"Found {len(obss)} observations")
 
     for idx, obs in enumerate(obss):
+        if opt.obsid and obs.obsid != opt.obsid:
+            continue
+
         logger.info("*" * 80)
         logger.info(f"Processing observation {obs.obsid}")
         logger.info("*" * 80)
@@ -1130,6 +1238,8 @@ def main(args=None):
         obs.obs_next = (
             obss[idx + 1] if idx < len(obss) - 1 else obs.obs_link_from_info("next")
         )
+        index_html_path = obs.report_dir / "index.html"
+        info_json_path = obs.report_dir / "info.json"
 
         try:
             # Need to use full AGASC not proseco_agasc for processing observations prior
@@ -1141,7 +1251,7 @@ def main(args=None):
 
         except SkipObservation as err:
             try:
-                make_html(obs, traceback=str(err))
+                write_index_html(obs, index_html_path, traceback=str(err))
             except Exception as err:
                 logger.error(f"Error making traceback HTML for {obs.obsid}: {err}")
             (obs.report_dir / "info.json").unlink(missing_ok=True)
@@ -1157,12 +1267,12 @@ def main(args=None):
             try:
                 # This SHOULD always work to preserve navigation and the traceback, but
                 # if it fails we'll just have to live with it.
-                make_html(obs, traceback=tb)
+                write_index_html(obs, index_html_path, traceback=tb)
             except Exception as err:
                 logger.error(f"Error making traceback HTML for {obs.obsid}: {err}")
 
             # Just in case, remove info file so observation is reprocessed next time.
-            (obs.report_dir / "info.json").unlink(missing_ok=True)
+            info_json_path.unlink(missing_ok=True)
 
         logger.info("")
 
