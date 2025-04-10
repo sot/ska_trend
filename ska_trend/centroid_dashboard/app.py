@@ -158,6 +158,15 @@ class PathsBase:
                 property(func),
             )
 
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+
+        self._report_dir = obj.report_dir
+        return self
+
+    def __set__(self, obj, value): ...
+
 
 class Paths(PathsBase):
     _names = [
@@ -169,15 +178,6 @@ class Paths(PathsBase):
         "index.html",
         "info.json",
     ]
-
-    def __get__(self, obj, objtype=None):
-        if obj is None:
-            return self
-
-        self._report_dir = obj.report_dir
-        return self
-
-    def __set__(self, obj, value): ...
 
 
 class ObservationFromInfo(ReportDirMixin):
