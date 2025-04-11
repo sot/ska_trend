@@ -6,6 +6,7 @@ import os
 import pickle
 import shutil
 import subprocess
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -172,7 +173,7 @@ class Paths(PathsBase):
     _names = [
         "centroid_resids_time.png",
         "n_kalman_delta_roll.png",
-        "has_gnd_att",
+        "kalman_plot_done",
         "centroid_resids_scatter.png",
         "centroid_resids.pkl",
         "index.html",
@@ -436,30 +437,33 @@ class Observation(razl.observations.Observation, ReportDirMixin):
     def starcat_summary(self):
         return self.starcat.copy()
 
+    def processed(self) -> bool:
+        """Check if the observation has already been fully processed.
 
-def processed(info_json_path: Path):
-    """Check if the observation has already been fully processed.
+        The check first confirms the existence every file in ``self.path`` attribute.
+        Then (if possible) get the info.json file and confirm a few key fields.
+        """
+        for name in dir(self.path):
+            if name.startswith("_"):
+                continue
+            path = getattr(self.path, name)
+            if isinstance(path, Path) and not path.exists():
+                return False
 
-    The check is based on the existence of the info.json file and the non-None values
-    obsid_next and obsid_prev keys in the file. This file is created/updated at the end
-    of the processing.
-    """
-    if not info_json_path.exists():
-        return False
-    info = json.loads(info_json_path.read_text())
-    # Check that info has a few key fields. Any processing exception will delete the
-    # info.json file.
-    out = (
-        info["kalman_start"]
-        and info["obs_links"]["next"]
-        and info["obs_links"]["prev"]
-        and info["one_shot"]
-        and (info["obsid"] >= 38000 or info["att_stats"])
-    )
-    # Last check requires that every OR has values of att_stats (from OBC vs GND
-    # attitude deltas). For planned OR's that do not run due to SCS-107, the att_stats
-    # will never be computed so these obsids get reprocessed every time.
-    return out
+        info = json.loads(self.path.info_json.read_text())
+        # Check that info has a few key fields. Any processing exception will delete the
+        # info.json file.
+        out = (
+            info["kalman_start"]
+            and info["obs_links"]["next"]
+            and info["obs_links"]["prev"]
+            and info["one_shot"]
+            and (self.is_ER or info["att_stats"])
+        )
+        # Last check requires that every OR has values of att_stats (from OBC vs GND
+        # attitude deltas). For planned OR's that do not run due to SCS-107, the att_stats
+        # will never be computed so these obsids get reprocessed every time.
+        return out
 
 
 def get_gnd_atts(
@@ -865,11 +869,23 @@ def plot_n_kalman_delta_roll(
     stop,
     obc_gnd_att_deltas: dict[str, npt.NDArray] | None,
     save_path: Path | None = None,
+    kalman_plot_done_path: Path | None = None,
+    is_ER: bool = False,
 ) -> None:
     """
     Fetch and plot number of Kalman stars for the obsid.
     """
-    if save_path and save_path.exists():
+    # Handle the case where an OR observation has been plotted but the ground aspect
+    # solution was not yet available. In that case the plot exists but the touch file
+    # does not. Once it gets filled in and the plot is made, we dont need to make it.
+    # The touch file means either the ground aspect solution is available or the
+    # observation is an ER which never has a ground aspect solution.
+    if (
+        save_path
+        and save_path.exists()
+        and kalman_plot_done_path
+        and kalman_plot_done_path.exists()
+    ):
         logger.info("Plot file exists, skipping")
         return
 
@@ -915,6 +931,10 @@ def plot_n_kalman_delta_roll(
         logger.info(f"Writing plot file {save_path}")
         fig.savefig(save_path)
         plt.close()
+
+    if kalman_plot_done_path and (obc_gnd_att_deltas or is_ER):
+        # Touch a file to indicate that there is no need to re-run the plot.
+        kalman_plot_done_path.touch()
 
 
 def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None) -> None:
@@ -1180,7 +1200,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
 
     # Skip processing if next_obsid is already in info.json. This implies that the
     # observation has already been processed.
-    if processed(obs.path.info_json):
+    if obs.processed():
         logger.info(f"ObsID {obs.obsid} already processed, skipping")
         return
 
@@ -1202,10 +1222,15 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     write_centroid_resids(crs, obs.path.centroid_resids_pkl)
 
     plot_crs_time(crs, obs.path.centroid_resids_time_png)
-    plot_n_kalman_delta_roll(
-        start, stop, obs.att_deltas, obs.path.n_kalman_delta_roll_png
-    )
     plot_crs_scatter(obs.starcat, crs, save_path=obs.path.centroid_resids_scatter_png)
+    plot_n_kalman_delta_roll(
+        start,
+        stop,
+        obs.att_deltas,
+        obs.path.n_kalman_delta_roll_png,
+        obs.path.kalman_plot_done,
+        obs.is_ER,
+    )
 
     update_starcat_summary(start, stop, obs.starcat, crs)
     write_index_html(obs, obs.path.index_html)
@@ -1253,14 +1278,14 @@ def main(args=None):
             try:
                 write_index_html(obs, index_html_path, traceback=str(err))
             except Exception as err:
-                logger.error(f"Error making traceback HTML for {obs.obsid}: {err}")
+                tb = traceback.format_exc()
+                logger.error(f"Error making traceback HTML for {obs.obsid}:\n{tb}")
             (obs.report_dir / "info.json").unlink(missing_ok=True)
 
         except Exception as err:
             if opt.raise_exc:
                 raise
             logger.info(f"Error processing {obs.obsid}: {err}")
-            import traceback
 
             tb = traceback.format_exc()
             logger.error(f"Error processing {obs.obsid}:\n{tb}")

@@ -104,7 +104,9 @@
                 <h2>Observation Details</h2>
 
                 <pre>
+{% if not traceback %}
 {{obs.kalman_start.get_conversions()["local"]}}
+{% endif %}
 
 ObsID <a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obsid}}&load_name={{obs.source}}" target="_blank">{{obs.obsid}}</a>
 Source <a href="../../{{obs.source}}">{{obs.source}}</a>
