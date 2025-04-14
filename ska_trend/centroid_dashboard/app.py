@@ -60,7 +60,7 @@ def get_opt():
     )
     parser.add_argument(
         "--data-root",
-        default=".",
+        default="reports",
         help="Root directory for data files (default=.)",
     )
     parser.add_argument(
@@ -121,17 +121,6 @@ def get_index_template():
     return path.read_text()
 
 
-class ReportDirMixin:
-    @functools.cached_property
-    def report_dir(self):
-        return Path(self.opt["data_root"]) / "reports" / self.report_subdir
-
-    @functools.cached_property
-    def report_subdir(self):
-        year = parse_cm.paths.parse_load_name(self.source)[-1]
-        return Path(str(year), self.source, f"{self.obsid:05d}")
-
-
 @dataclass
 class CentroidResidualsLite:
     """Lite version of CentroidResiduals.
@@ -146,48 +135,80 @@ class CentroidResidualsLite:
     zag_times: npt.NDArray
 
 
-class PathsBase:
-    def __init_subclass__(cls) -> None:
-        def create_property(self, name):
-            return self._report_dir / name
+class Paths:
+    """Path objects for the Observation class.
 
-        for name in cls._names:
-            func = functools.partial(create_property, name=name)
-            setattr(
-                cls,
-                name.replace(".", "_"),
-                property(func),
-            )
+    This class provides a descriptor for the paths to the files in the report directory.
+    The paths are created when the Observation object is created and are relative to the
+    report directory.
+
+    Parameters
+    ----------
+    root_path_attr : str
+        The name of the attribute in the Observation class that contains the output data
+        root path. This is "report_dir" for this application.
+    """
 
     def __get__(self, obj, objtype=None):
-        if obj is None:
-            return self
-
-        self._report_dir = obj.report_dir
+        self._obj = obj
         return self
 
     def __set__(self, obj, value): ...
 
+    @property
+    def report_dir(self) -> Path:
+        obj = self._obj
+        return Path(obj.opt["data_root"]) / obj.path.report_subdir
 
-class Paths(PathsBase):
-    _names = [
-        "centroid_resids_time.png",
-        "n_kalman_delta_roll.png",
-        "kalman_plot_done",
-        "centroid_resids_scatter.png",
-        "centroid_resids.pkl",
-        "index.html",
-        "info.json",
-    ]
+    @property
+    def report_subdir(self) -> Path:
+        obj = self._obj
+        year = parse_cm.paths.parse_load_name(obj.source)[-1]
+        return Path(str(year), obj.source, f"{obj.obsid:05d}")
+
+    @property
+    def centroid_resids_time_png(self) -> Path:
+        return self._obj.path.report_dir / "centroid_resids_time.png"
+
+    @property
+    def n_kalman_delta_roll_png(self) -> Path:
+        return self._obj.path.report_dir / "n_kalman_delta_roll.png"
+
+    @property
+    def kalman_plot_done(self) -> Path:
+        return self._obj.path.report_dir / "kalman_plot_done"
+
+    @property
+    def centroid_resids_scatter_png(self) -> Path:
+        return self._obj.path.report_dir / "centroid_resids_scatter.png"
+
+    @property
+    def centroid_resids_pkl(self) -> Path:
+        return self._obj.path.report_dir / "centroid_resids.pkl"
+
+    @property
+    def index_html(self) -> Path:
+        return self._obj.path.report_dir / "index.html"
+
+    @property
+    def info_json(self) -> Path:
+        return self._obj.path.report_dir / "info.json"
+
+    @property
+    def obsid_two_obsid_dir(self):
+        obj = self._obj
+        obsid_str = f"{obj.obsid:05d}"
+        return Path(obj.opt["data_root"]) / obsid_str[:2] / obsid_str
 
 
-class ObservationFromInfo(ReportDirMixin):
+class ObservationFromInfo():
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
+    path = Paths()
 
 @dataclass(repr=False, kw_only=True)
-class Observation(razl.observations.Observation, ReportDirMixin):
+class Observation(razl.observations.Observation):
     obs_next: Optional["Observation"] = None
     obs_prev: Optional["Observation"] = None
     path: Paths = Paths()
@@ -345,7 +366,7 @@ class Observation(razl.observations.Observation, ReportDirMixin):
         # If the current obs does not have an info.json file then we have no way to
         # get info about the prev/next obs. In this case return None. This normally
         # happens for the last observation when processing new observations.
-        if not (info_json := self.report_dir / "info.json").exists():
+        if not (info_json := self.path.info_json).exists():
             logger.info(f"No {info_json} file found, obs=None")
             return None
 
@@ -360,7 +381,7 @@ class Observation(razl.observations.Observation, ReportDirMixin):
             return None
 
         obs = ObservationFromInfo(opt=self.opt, **obs_link)
-        if (info_json_link := obs.report_dir / "info.json").exists():
+        if (info_json_link := obs.path.info_json).exists():
             info_link = json.loads(info_json_link.read_text())
             obs = ObservationFromInfo(opt=self.opt, **info_link)
         logger.info(f"Found {link} obsid {obs.obsid}")
@@ -1189,7 +1210,7 @@ class SkipObservation(Exception):
 
 def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
-    report_dir = obs.report_dir
+    report_dir = obs.path.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
     # Allow for selective reprocessing by removing files
@@ -1235,6 +1256,27 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     update_starcat_summary(start, stop, obs.starcat, crs)
     write_index_html(obs, obs.path.index_html)
     write_info_json(obs, obs.path.info_json)
+    make_obsid_dir_links(obs)
+
+def make_obsid_dir_links(obs: Observation):
+    """Make symbolic links to the obsid-based directory structure.
+
+    Every file that is in the report directory ``obs.report_dir`` is linked to the
+    obsid-based directory structure within ``obs.path.obsid_two_obsid_dir``. This is
+    done to allow for back-compatible access from mica.
+    """
+    in_dir = obs.path.report_dir
+    out_dir = obs.path.obsid_two_obsid_dir
+    print(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for target_path in in_dir.glob("*"):
+        link_path = out_dir / target_path.name
+        if link_path.exists(follow_symlinks=False):
+            logger.info(f"Removing existing file {link_path}")
+            link_path.unlink()
+        logger.info(f"Linking {target_path} to {link_path}")
+        link_path.symlink_to(os.path.relpath(target_path, start=link_path.parent))
 
 
 def main(args=None):
@@ -1263,8 +1305,8 @@ def main(args=None):
         obs.obs_next = (
             obss[idx + 1] if idx < len(obss) - 1 else obs.obs_link_from_info("next")
         )
-        index_html_path = obs.report_dir / "index.html"
-        info_json_path = obs.report_dir / "info.json"
+        index_html_path = obs.path.index_html
+        info_json_path = obs.path.info_json
 
         try:
             # Need to use full AGASC not proseco_agasc for processing observations prior
@@ -1280,7 +1322,7 @@ def main(args=None):
             except Exception as err:
                 tb = traceback.format_exc()
                 logger.error(f"Error making traceback HTML for {obs.obsid}:\n{tb}")
-            (obs.report_dir / "info.json").unlink(missing_ok=True)
+            obs.path.info_json.unlink(missing_ok=True)
 
         except Exception as err:
             if opt.raise_exc:
