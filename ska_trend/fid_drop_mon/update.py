@@ -51,7 +51,7 @@ def get_opt():
         action="append",
         dest="emails",
         default=[],
-        help="Email address for notificaion",
+        help="Email address for notification",
     )
     return parser
 
@@ -227,8 +227,6 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
                 track_samples = np.count_nonzero(ok_kalm)
                 track_ok = np.count_nonzero(track_telem.vals[ok_kalm] == "TRAK")
                 track_fraction = track_ok / track_samples
-                if manvr.obsid == 62615:
-                    raise ValueError
                 fid_data.append(
                     {
                         "start": npnt_start,
