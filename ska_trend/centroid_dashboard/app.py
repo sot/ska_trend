@@ -201,11 +201,12 @@ class Paths:
         return Path(obj.opt["data_root"]) / obsid_str[:2] / obsid_str
 
 
-class ObservationFromInfo():
+class ObservationFromInfo:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
     path = Paths()
+
 
 @dataclass(repr=False, kw_only=True)
 class Observation(razl.observations.Observation):
@@ -464,9 +465,16 @@ class Observation(razl.observations.Observation):
         The check first confirms the existence every file in ``self.path`` attribute.
         Then (if possible) get the info.json file and confirm a few key fields.
         """
-        for name in dir(self.path):
-            if name.startswith("_"):
-                continue
+        names = [
+            "centroid_resids_time_png",
+            "n_kalman_delta_roll_png",
+            "kalman_plot_done",
+            "centroid_resids_scatter_png",
+            "centroid_resids_pkl",
+            "index_html",
+            "info_json",
+        ]
+        for name in names:
             path = getattr(self.path, name)
             if isinstance(path, Path) and not path.exists():
                 return False
@@ -1257,6 +1265,7 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     write_index_html(obs, obs.path.index_html)
     write_info_json(obs, obs.path.info_json)
     make_obsid_dir_links(obs)
+
 
 def make_obsid_dir_links(obs: Observation):
     """Make symbolic links to the obsid-based directory structure.
