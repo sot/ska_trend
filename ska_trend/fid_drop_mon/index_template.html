@@ -64,17 +64,19 @@
 <TR>
     <TH class="text-center" style="width: 15%;">Interval Start</TH>
     <TH class="text-center" style="width: 15%;">Interval Stop</TH>
+    <TH class="text-center" style="width: 10%;">Load Name</TH>
     <TH class="text-center" style="width: 10%;">Obsid</TH>
     <TH class="text-center" style="width: 10%;">Fid Slot</TH>
     <TH class="text-center" style="width: 10%;">Track Fraction</TH>
-    <TH class="text-center" style="width: 40%;">Notes</TH>
+    <TH class="text-center" style="width: 30%;">Notes</TH>
 </TR>
 
 {% for obs in obs_events_last %}
 <TR>
 <TD>{{obs['start']}}</TD>
 <TD>{{obs['stop']}}</TD>
-<TD ALIGN="right">{{obs['obsid_telem']}}</TD>
+<TD>{{obs['load_name']}}</TD>
+<TD ALIGN="right">{{obs['obsid']}}</TD>
 <TD ALIGN="right">{{ obs['slot'] }}</TD>
 <TD ALIGN="right">{{ '%.2f' | format(obs['track_fraction'])}}</TD>
 <TD ALIGN="right">{{ obs['notes'] }}</TD>
@@ -88,16 +90,20 @@
 <TR>
     <TH class="text-center" style="width: 15%;">Interval Start</TH>
     <TH class="text-center" style="width: 15%;">Interval Stop</TH>
+    <TH class="text-center" style="width: 10%;">Load Name</TH>
     <TH class="text-center" style="width: 10%;">Obsid</TH>
     <TH class="text-center" style="width: 10%;">Fid Slot</TH>
     <TH class="text-center" style="width: 10%;">Track Fraction</TH>
-    <TH class="text-center" style="width: 40%;">Notes</TH>
+    <TH class="text-center" style="width: 30%;">Notes</TH>
 </TR>
 {% for obs in obs_events %}
 <TR>
 <TD>{{obs['start']}}</TD>
 <TD>{{obs['stop']}}</TD>
-<TD ALIGN="right">{{obs['obsid_telem']}}</A></TD>
+<TD ALIGN="center">{{obs['load_name']}}</TD>
+<TD ALIGN="right">
+<A HREF="https://kadi.cfa.harvard.edu/mica/?obsid_or_date={{obs['obsid']}}&load_name={{obs['load_name']}}">
+    {{obs['obsid']}}</A></TD>
 <TD ALIGN="right">{{ obs['slot'] }}</TD>
 <TD ALIGN="right">{{ '%.2f' | format(obs['track_fraction'])}}</TD>
 <TD ALIGN="right">{{ obs['notes'] }}</TD>

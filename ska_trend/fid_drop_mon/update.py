@@ -11,7 +11,7 @@ from cheta import fetch
 from cheta.utils import logical_intervals
 from cxotime import CxoTime, CxoTimeLike
 from kadi import events
-from kadi.commands.observations import get_starcats
+from kadi.commands.observations import get_observations, get_starcats
 from ska_helpers.logging import basic_logger
 from ska_helpers.run_info import log_run_info
 
@@ -168,6 +168,9 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
     starcats = get_starcats(start=start - 5 * u.day)
     dates = [starcat.date for starcat in starcats]
 
+    obss = get_observations(start=start - 5 * u.day)
+    obs_start_dates = [obs["obs_start"] for obs in obss]
+
     scs107_intervals = get_scs107_intervals(start, stop)
 
     fid_data = []
@@ -179,6 +182,11 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
         idx = np.searchsorted(dates, manvr.kalman_start) - 1
         # get the starcat before the kalman start
         starcat = starcats[idx]
+
+        # get the observation closest to the kalman start
+        obs_idx = np.searchsorted(obs_start_dates, manvr.kalman_start) - 1
+        obs = obss[obs_idx]
+
         fid_slots = list(starcat["slot"][(starcat["type"] == "FID")])
         fid_ids = list(starcat["id"][(starcat["type"] == "FID")])
         if len(fid_slots) == 0:
@@ -232,12 +240,13 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
                         "start": npnt_start,
                         "stop": npnt_stop,
                         "starcat_date": starcat.date,
-                        "obsid_telem": starcat.obsid,
+                        "obsid": starcat.obsid,
                         "slot": slot,
                         "fid_id": fid_id,
                         "track_samples": track_samples,
                         "track_ok": track_ok,
                         "track_fraction": track_fraction,
+                        "load_name": obs["source"],
                     }
                 )
 
