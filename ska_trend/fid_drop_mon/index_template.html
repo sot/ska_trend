@@ -76,7 +76,9 @@
 <TD>{{obs['start']}}</TD>
 <TD>{{obs['stop']}}</TD>
 <TD>{{obs['load_name']}}</TD>
-<TD ALIGN="right">{{obs['obsid']}}</TD>
+<TD ALIGN="right">
+    <A HREF="https://kadi.cfa.harvard.edu/mica/?obsid_or_date={{obs['obsid']}}&load_name={{obs['load_name']}}">
+        {{obs['obsid']}}</A></TD>
 <TD ALIGN="right">{{ obs['slot'] }}</TD>
 <TD ALIGN="right">{{ '%.2f' | format(obs['track_fraction'])}}</TD>
 <TD ALIGN="right">{{ obs['notes'] }}</TD>
