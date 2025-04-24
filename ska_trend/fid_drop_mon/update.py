@@ -370,11 +370,12 @@ def main(args=None):
                 send_mail(
                     LOGGER,
                     opt,
-                    f"Fid drop: Obsid {row['obsid_telem']} {row['start']}",
+                    f"Fid drop: Obsid {row['obsid']} {row['start']}",
                     f"Fid drop in the dwell that starts at {row['start']}\n"
-                    f"Obsid {row['obsid_telem']} Fid slot {row['slot']} tracked "
+                    f"Obsid {row['obsid']} Fid slot {row['slot']} tracked "
                     f"for {row['track_fraction']:.3f} fraction.\n"
-                    f"See {URL}",
+                    f"See {URL}\n"
+                    f"Review with aca_view --start '{row['start']}' --stop '{row['stop']}'\n",
                     __file__,
                 )
 
