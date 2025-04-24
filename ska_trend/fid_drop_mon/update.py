@@ -17,8 +17,8 @@ from ska_helpers.run_info import log_run_info
 
 from ska_trend import __version__
 
-DOC_ID = "1qHF6-3oz6MSJYd3goQTMdcteXWUjKyHycdWSMCd9S40"
-GID = 0
+DOC_ID = "1GoYBTIQAv0qq2vh3jYxHBYHfEq2I8LVGMiScDX7OFvw"
+GID = "1266351479"
 url_start = "https://docs.google.com/spreadsheets/d"
 GSHEET_URL = f"{url_start}/{DOC_ID}/export?format=csv&id={DOC_ID}&gid={GID}"
 GSHEET_USER_URL = f"{url_start}/{DOC_ID}/edit?usp=sharing"
