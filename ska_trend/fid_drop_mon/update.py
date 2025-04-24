@@ -247,7 +247,7 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
 @functools.cache
 def get_fid_notes(data_root) -> Table:
     """
-    Get the high background notes from the Google Sheet.
+    Get the fid light notes from the Google Sheet.
 
     Parameters
     ----------
