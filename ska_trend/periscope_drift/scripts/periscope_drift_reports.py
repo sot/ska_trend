@@ -1,26 +1,44 @@
 #!/usr/bin/env python
 
 import argparse
-import json
 import os
+import re
+import sys
 from pathlib import Path
 
-import matplotlib
+import ska_helpers
 from cxotime import CxoTime
 from cxotime import units as u
 
-from ska_trend.periscope_drift.reports import TASK, logger, make_html, process_interval
+from ska_trend.periscope_drift import processing, reports
+
+logger = ska_helpers.logging.basic_logger(
+    "periscope_drift_reports", level="WARNING", format="%(message)s"
+)
 
 
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--output",
-        default=Path(os.environ["SKA"]) / "www" / "ASPECT" / TASK,
+        default=Path(os.environ["SKA"]) / "www" / "ASPECT" / "periscope_drift",
         type=Path,
         help="Output directory",
     )
+    parser.add_argument("--start", default="-30d")
     parser.add_argument("--stop", default=None)
+    parser.add_argument(
+        "--workdir",
+        default=Path("/data/aca/periscope_drift/work"),
+        type=Path,
+        help="Working directory",
+    )
+    parser.add_argument(
+        "--archive-dir",
+        default=Path("/data/aca/periscope_drift/data"),
+        type=Path,
+        help="Archive directory",
+    )
     parser.add_argument(
         "--log-level",
         default="DEBUG",
@@ -38,62 +56,68 @@ def get_parser():
         ],
         help="Verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
     )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        type=Path,
+        help="Log file. If not specified, log to stdout.",
+    )
     return parser
 
 
 def main():
-    matplotlib.use("Agg")
+    args = get_parser().parse_args()
 
-    opt = get_parser().parse_args()
-    logger.setLevel(opt.log_level.upper())
+    if args.log_file is not None:
+        filename = args.log_file
+        stream = None
+    else:
+        filename = None
+        stream = sys.stdout
+
+    logger = ska_helpers.logging.basic_logger(
+        "astromon",
+        level=args.log_level.upper(),
+        format="%(message)s",
+        stream=stream,
+    )
+
+    logger = ska_helpers.logging.basic_logger(
+        "periscope_drift_reports",
+        level=args.log_level.upper(),
+        format="%(message)s",
+        stream=stream,
+    )
 
     now = CxoTime()
     logger.info(
         "---------- periscope drift reports update at %s ----------" % (now.iso)
     )
 
-    stop = now if opt.stop is None else CxoTime(opt.stop)
+    stop = now if args.stop is None else CxoTime(args.stop)
 
-    time_ranges = [
-        {
-            "name": "month",
-            "start": stop - 30 * u.day,
-            "stop": stop,
-        },
-        {
-            "name": "quarter",
-            "start": stop - 90 * u.day,
-            "stop": stop,
-        },
-        {
-            "name": "half-year",
-            "start": stop - 182 * u.day,
-            "stop": stop,
-        },
-        {
-            "name": "year",
-            "start": stop - 365 * u.day,
-            "stop": stop,
-        },
-    ]
+    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start, re.VERBOSE):
+        start = stop + float(args.start[:-1]) * u.d
+    else:
+        start = CxoTime(start)
 
-    data = []
-    for tr in time_ranges:
-        logger.debug("Attempting to update %s" % tr["name"])
+    observations, sources, errors = processing.process_interval(
+        start,
+        stop,
+        archive_dir=args.archive_dir,
+        workdir=args.workdir,
+        log_level=args.log_level,
+        show_progress=False,
+    )
 
-        rep = process_interval(
-            start=tr["start"],
-            stop=tr["stop"],
-            name=tr["name"],
-            output=opt.output,
-        )
-        data.append(rep)
+    reports.write_html_report(args.output, observations, sources)
 
-    make_html(data, outdir=opt.output)
+    import json
+    with open(args.output / "sources.json", "w") as fh:
+        json.dump(sources.to_pandas().to_json(), fh)
 
-    with open(opt.output / "data.json", "w") as rep_file:
-        rep_file.write(json.dumps(data, sort_keys=True, indent=2))
-
+    with open(args.workdir / "errors.json", "w") as fh:
+        json.dump(errors, fh)
 
 
 if __name__ == "__main__":
