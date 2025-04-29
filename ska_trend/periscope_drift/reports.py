@@ -201,15 +201,26 @@ def smooth(x, window_len=10, window="hanning"):
             "Window is on of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'"
         )
 
-    ones = np.ones(window_len)
+    # the array is padded at both ends with (window_len-1) entries
+    # of those, at most len(x) entries are the signal reflected
+    # the rest are the begin and end of the signal
+    # examples with x = [1, 2, 3, 4, 5]:
+    # window_len = 4: s = [4, 3, 2, 1, 2, 3, 4, 5, 4, 3, 2]
+    # window_len = 6: s = [5, 5, 4, 3, 2, 1, 2, 3, 4, 5, 4, 3, 2, 1, 1]
+    padded_length = x.shape[0] + 2* window_len -2
     s = np.r_[
-        ones[: window_len - len(x)] * x[-1],
         x[window_len - 1 : 0 : -1],
         x,
-        x[-1:-window_len:-1],
-        ones[: window_len - (len(x) + 1)] * x[0],
+        x[-2 : -window_len-1 : -1],
     ]
-    # s=numpy.r_[2*x[0]-x[window_len:1:-1],x,2*x[-1]-x[-1:-window_len:-1]]
+    if s.shape[0] < padded_length:
+        extra = int((padded_length - s.shape[0]) // 2)
+        ones = np.ones(extra)
+        s = np.r_[
+            ones * s[0],
+            s,
+            ones * s[-1],
+        ]
 
     # Moving average
     if window == "flat":
