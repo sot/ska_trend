@@ -32,88 +32,124 @@
   <div class="container-md">
     <h2> Periscope Trending Report </h2>
 
-    <!--
-      <p>
-      </p>
-    -->
+	<table class="table">
+		<tbody>
+			<tr>
+				<th>Start</th> <td>{{ start }} ({{ start_iso }})</td>
+			</tr>
+			<tr>
+				<th>Stop</th> <td>{{ stop }} ({{ stop_iso }})</td>
+			</tr>
+		</tbody>
+	</table>
 
-    <ul class="nav nav-tabs" id="myTab" role="tablist">
-    {% for tr in time_ranges %} 
-      <li class="nav-item" role="presentation">
-        <button 
-          class="nav-link {% if loop.index == 1%}active{% endif %}"
-          id="{{ tr.name }}-tab"
-          data-bs-toggle="tab"
-          data-bs-target="#{{ tr.name }}"
-          type="button"
-          role="tab"
-          aria-controls="{{ tr.name }}"
-          aria-selected="{% if loop.index == 1%}true{% else %}false{% endif %}"
-        >
-          {{ tr.name }}
-        </button>
-      </li>
-    {% endfor %}
-    </ul>
-    <div class="tab-content" id="myTabContent">
-    {% for tr in time_ranges %} 
-      <div class="tab-pane fade {% if loop.index == 1%}show active{% endif %}" id="{{ tr.name }}" role="tabpanel" aria-labelledby="{{ tr.name }}-tab">
-        <h3>{{ tr.human_date_start }} through {{ tr.human_date_stop }} ({{ tr.datestart[:8] }} - {{ tr.datestop[:8] }})</h3>
-
-        <table>
-          <tr>
-            <td>N Observations:</td> <td>{{ tr.n_obs }}</td>
-          </tr>
-          <tr>
-            <td>Mean correction:</td><td>{{ "%.3f"|format(tr.mean_drift)}} (arcsec)</td>
-          </tr>
-          <tr>
-            <td>Largest correction:</td><td>{{ "%.3f"|format(tr.max_drift) }} (arcsec)</td>
-          </tr>
-        </table>
-          
-        <h3>Histogram of periscope drift in arcsecs</h3>
-          
-        <img src="{{ tr.plots.drift_histogram.filename }}">
-          
-        <h3>Obsid with largest periscope drift this interval</h3>
-          
-        <table>
-          <tr>
-            <td><img src="{{ tr.plots.large_drift_ang_y_corr.filename }}"></td>
-            <td><img src="{{ tr.plots.large_drift_ang_z_corr.filename }}"></td>
-          </tr>
-        </table>
-          
-        <h3>Obsid with large periscope drift and a bright source with a small
-          'detsize'.</h3>
-          
-        <p>{{ tr.src_plot.label }}</p>
-
-        <table>
-          <tr>
-            <td><img src="{{ tr.src_plot.pict }}"</td>
-          </tr>
-          <tr>
-            <td><img src="{{ tr.src_plot.yag_plot }}"</td>
-            <td><img src="{{ tr.src_plot.zag_plot }}"</td>
-          </tr>
-          <tr>
-            <td><img src="{{ tr.src_plot.yag_corr_plot }}"</td>
-            <td><img src="{{ tr.src_plot.zag_corr_plot }}"</td>
-          </tr>
-        </table>
-
-      </div>
-    {% endfor %}
+	<h3> Drift </h3>
+    <div class="ratio" style="--bs-aspect-ratio: 40%;">
+      {{drift_figure}}
     </div>
-  </div>
+
+	<h3> Chi2 </h3>
+    <div class="ratio" style="--bs-aspect-ratio: 40%;">
+		{{chi2_figure}}
+    </div>
+	
+	<h3> p-value </h3>
+    <div class="ratio" style="--bs-aspect-ratio: 40%;">
+		{{p_value_figure}}
+    </div>
+	
+	<h3> Selected Sources </h3>
+
+	{% for table in tables %}
+	<div class="accordion" id="sourceTablesAccordion">
+      <div class="accordion-item">
+        <h2 class="accordion-header" id="heading_{{ table.id }}">
+          <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse_{{ table.id }}" aria-expanded="true" aria-controls="collapse_{{ table.id }}">
+            {{ table.title }}
+          </button>
+        </h2>
+        <div id="collapse_{{ table.id }}" class="accordion-collapse collapse show" aria-labelledby="heading_{{ table.id }}" data-bs-parent="#sourceTablesAccordion">
+          <div class="accordion-body">
+			<table class="table">
+				<thead>
+					<tr>
+						<th>OBSID</th>
+						<th>src</th>
+						<th colspan="2">expected drift (arcsec)</th>
+						<th colspan="2">drift residual (arcsec)</th>
+						<th colspan="2">chi2</th>
+						<th colspan="2">p_value</th>
+					</tr>
+					<tr>
+						<th></th>
+						<th></th>
+						<th>yag</th>
+						<th>zag</th>
+						<th>yag</th>
+						<th>zag</th>
+						<th>yag</th>
+						<th>zag</th>
+						<th>yag</th>
+						<th>zag</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for row in table.sources %}
+					<tr>
+						<td><a href="{{row.filename}}">{{row.obsid}}</a></td>
+						<td>{{row.id}}</td>
+						<td>{{'{:.2f}'.format(row.drift_yag_expected)}}</td>
+						<td>{{'{:.2f}'.format(row.drift_zag_expected)}}</td>
+						<td>{{'{:.2f}'.format(row.drift_yag_residual)}}</td>
+						<td>{{'{:.2f}'.format(row.drift_zag_residual)}}</td>
+						<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_yag_null_chi2_corr)}}</td>
+						<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_zag_null_chi2_corr)}}</td>
+						<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_yag_null_p_value_corr)}}</td>
+						<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_zag_null_p_value_corr)}}</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+          </div>
+        </div>
+      </div>
+    </div>
+	{% endfor %}
 
 
   <script
     src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
     integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
     crossorigin="anonymous">
+  </script>
+
+  <script>
+	// the figure ID is set in the to_html method of the plotly figure using `div_id=...`
+	var myPlot = document.getElementById('drift_figure');
+
+	myPlot.on('plotly_click', function(data) {
+		// this function requires:
+		//   - that the points array is not empty (clicked on a marker)
+		//   - that the first point's custom data is an array with at least two elements
+		// If any of these conditions are not met, the function fails silently.
+		// If they are met, the first two elements of customdata are interpreted as obsid and src_id
+		// and a URL path based on obsid and src_id is open in a new tab.
+		// This URL needs to agree with the file/directory structure
+		if (
+			!data.points
+			|| !data.points[0]
+			|| !data.points[0].customdata
+			|| data.points[0].customdata.length < 2
+		) {
+			// console.warn('No valid custom data found for the clicked point.');
+			return;
+		}
+		const obsid = data.points[0].customdata[0];
+		const src_id = data.points[0].customdata[1];
+		const path = {{ context.source_report_path }};
+		console.log(`opening path: ${path} for obsid: ${obsid}, src_id: ${src_id}`);
+		window.open(path, '_blank');
+	});
   </script>
 
 </body>
