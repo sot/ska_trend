@@ -61,7 +61,7 @@ def get_opt():
     parser.add_argument(
         "--data-root",
         default="reports",
-        help="Root directory for data files (default=.)",
+        help="Root directory for data files (default=reports)",
     )
     parser.add_argument(
         "--remove",
@@ -488,6 +488,7 @@ class Observation(razl.observations.Observation):
             and info["obs_links"]["prev"]
             and info["one_shot"]
             and (self.is_ER or info["att_stats"])
+            and self.path.obsid_two_obsid_dir.exists()
         )
         # Last check requires that every OR has values of att_stats (from OBC vs GND
         # attitude deltas). For planned OR's that do not run due to SCS-107, the att_stats
@@ -1276,7 +1277,6 @@ def make_obsid_dir_links(obs: Observation):
     """
     in_dir = obs.path.report_dir
     out_dir = obs.path.obsid_two_obsid_dir
-    print(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for target_path in in_dir.glob("*"):
