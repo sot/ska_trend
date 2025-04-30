@@ -35,6 +35,7 @@ setup(
             "wrong_box_anom/task_schedule.cfg",
             "bad_periscope_gradient/task_schedule.cfg",
             "centroid_dashboard/index_template.html",
+            "centroid_dashboard/task_schedule.cfg",
         ]
     },
 )
