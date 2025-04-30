@@ -1,0 +1,221 @@
+<html>
+
+<head>
+    <title>Obsid {{obs.obsid}}</title>
+
+    <style type="text/css">
+        body {
+            margin-left: 20px;
+            background-color: lightblue;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        div.border {
+            background-color: white;
+            padding-left: 5px;
+            padding-right: 5px;
+            padding-bottom: 5px;
+            border-style: solid;
+            border-width: 2px;
+            border-radius: 10px;
+        }
+
+        /* Create three equal columns that floats next to each other */
+        .column1 {
+            float: left;
+            width: 300px;
+            padding: 5px;
+        }
+
+        .column2 {
+            float: left;
+            width: 640px;
+            padding: 5px;
+        }
+
+        .column3 {
+            float: left;
+            width: 500px;
+            padding: 5px;
+        }
+
+        /* Clear floats after the columns */
+        .row:after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        table.single-line {
+            border-width: medium;
+            border-spacing: 2px;
+            border-style: none;
+            border-color: gray;
+            border-collapse: collapse;
+            background-color: white;
+        }
+
+        table.single-line th {
+            border-width: 2px;
+            padding: 2px 3px 2px 3px;
+            border-style: inset;
+            border-color: gray;
+            background-color: white;
+        }
+
+        table.single-line td {
+            border-width: 2px;
+            padding: 2px 3px 2px 3px;
+            border-style: inset;
+            border-color: gray;
+            background-color: white;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="column1">
+
+        <div class="border" style="padding: 10px; margin-bottom: .5cm">
+            <span id="label" style="font-size:150%; font-weight:bold;">
+                {% if obs.obs_prev %}
+                <a href="../../../{{obs.obs_prev.path.report_subdir}}/index.html">
+                    Prev</a>
+                {% else %}
+                None
+                {% endif %}
+                - {{obs.obsid}} -
+                {% if obs.obs_next %}
+                <a href="../../../{{obs.obs_next.path.report_subdir}}/index.html">
+                    Next</a>
+                {% else %}
+                None
+                {% endif %}
+            </span>
+        </div>
+
+        <div class="border" style="float: left; margin-bottom: .5cm;">
+
+            <div>
+                <h2>Observation Details</h2>
+
+                <pre>
+{% if not traceback %}
+{{obs.kalman_start.get_conversions()["local"]}}
+{% endif %}
+
+ObsID <a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obsid}}&load_name={{obs.source}}" target="_blank">{{obs.obsid}}</a>
+Source <a href="../../{{obs.source}}">{{obs.source}}</a>
+{% if not traceback %}  <!-- if not traceback -->
+Kalman start: {{obs.kalman_start.date}}
+        stop: {{obs.kalman_stop.date}}
+    Duration: {{"{:.0f}".format((obs.kalman_stop - obs.kalman_start).sec)}} sec
+
+T_ccd (mean, max): {{"{:.1f}".format(obs.t_ccd_mean)}}, {{"{:.1f}".format(obs.t_ccd_max)}} C
+
+Manvr angle: {{"{:.2f}".format(obs.manvr_angle)}} deg
+{% if obs.manvr_angles_text %}
+{{obs.manvr_angles_text }}
+{% endif %}
+
+One shot:
+ Total: {{"{:.1f}".format(obs.one_shot.total)}} arcsec
+ Pitch, yaw: {{"{:5.1f}".format(obs.one_shot.pitch)}}, {{"{:5.1f}".format(obs.one_shot.yaw)}} arcsec
+ {% if obs.aber.status == "OK" %}
+ Aber (p,y): {{"{:5.1f}".format(obs.aber.y)}}, {{"{:5.1f}".format(obs.aber.z)}} arcsec
+ Total (aber corr'd): {{"{:.1f}".format(obs.one_shot.aber_corrected)}} arcsec
+{% else %}
+ Aber: {{obs.aber.status}}
+{% endif %}
+{% if obs.obsid < 38000 %}
+
+OBC vs GND delta roll:
+{% if obs.att_stats %}
+ 50%, 95%: {{"{:.2f}".format(obs.att_stats.d_roll50)}}, {{"{:.2f}".format(obs.att_stats.d_roll95)}} arcsec
+ End: {{"{:.2f}".format(obs.att_stats.d_roll_end)}} arcsec
+{% else %}
+ Pending Aspect L1 data
+{% endif %}
+{% endif %}
+
+Prev Observation: {% if obs.obs_prev %}
+<a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obs_prev.obsid}}" target="_blank">{{obs.obs_prev.obsid}}</a>
+{% if obs.obs_prev.att_stats.d_roll_end %}
+End roll error = {{"{:.2f}".format(obs.obs_prev.att_stats.d_roll_end)}} arcsec
+{% endif %}
+{% else %}
+None
+{% endif %}
+
+Next Observation: {% if obs.obs_next %}
+<a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obs_next.obsid}}" target="_blank">{{obs.obs_next.obsid}}</a>
+{% else %}
+None
+{% endif %}
+{% endif %}</pre> <!-- if not traceback-->
+            </div>
+        </div>
+    </div>
+
+    {% if not traceback %} <!-- if not traceback -->
+    <div class="column2">
+        <div id="rightsmall" class="border"
+            style="padding-top: 10px; margin-bottom: .5cm">
+            <img src="n_kalman_delta_roll.png" width="620">
+        </div>
+        <div id="rightsmall" class="border"
+            style="padding-top: 10px; margin-bottom: .5cm">
+            <img src="centroid_resids_time.png" width="620">
+        </div>
+    </div>
+
+    <div class="column3">
+        <div class="border" style="float: left; margin-bottom: .5cm;">
+            <div id="leftsmall">
+                <h2>Catalog and centroid residuals</h2>
+                <table class="single-line" style="font-size:12px" align="center">
+                    <tr>
+                        <th align='right'>Slot</th>
+                        <th align='right'>ID</th>
+                        <th align='right'>Type</th>
+                        <th align='right'>Mag</th>
+                        <th align='right'>Yang</th>
+                        <th align='right'>Zang</th>
+                        <th align='right'>Med Mag</th>
+                        <th align='right'>Med DY</th>
+                        <th align='right'>Med DZ</th>
+                    </tr>
+                    {% for row in obs.starcat_summary %}
+                    <tr>
+                        <td align='right'>{{row["slot"]}}</td>
+                        <td align='right'>{{row["id"]}}</td>
+                        <td align='right'>{{row["type"]}}</td>
+                        <td align='right'>{{"{:.2f}".format(row["mag"])}}</td>
+                        <td align='right'>{{"{:.2f}".format(row["yang"])}}</td>
+                        <td align='right'>{{"{:.2f}".format(row["zang"])}}</td>
+                        <td align='right'>{{"{:.3f}".format(row["mag_median"])}}</td>
+                        <td align='right'>{{"{:.2f}".format(row["dyag_median"])}}</td>
+                        <td align='right'>{{"{:.2f}".format(row["dzag_median"])}}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                <img src="centroid_resids_scatter.png" width="480">
+            </div>
+        </div>
+    </div>
+    {% else %} <!-- if traceback-->
+    <div class="column2">
+        <div class="border" style="float: left; margin-bottom: .5cm;">
+            <pre>
+{{traceback}}</pre>
+        </div>
+    </div>
+    {% endif %} <!-- if not traceback-->
+
+</body>
+
+</html>

@@ -5,6 +5,7 @@ entry_points = {
     "console_scripts": [
         "ska_trend_wrong_box_updates=ska_trend.wrong_box_anom.wrong_box_anom:main",
         "ska_trend_bad_periscope=ska_trend.bad_periscope_gradient.periscope_update:main",
+        "ska_trend_centroid_dashboard=ska_trend.centroid_dashboard.app:main",
     ]
 }
 
@@ -26,12 +27,15 @@ setup(
         "ska_trend",
         "ska_trend.wrong_box_anom",
         "ska_trend.bad_periscope_gradient",
+        "ska_trend.centroid_dashboard",
     ],
     package_data={
         "ska_trend": [
             "wrong_box_anom/index_template.html",
             "wrong_box_anom/task_schedule.cfg",
             "bad_periscope_gradient/task_schedule.cfg",
+            "centroid_dashboard/index_template.html",
+            "centroid_dashboard/task_schedule.cfg",
         ]
     },
 )
