@@ -105,6 +105,7 @@ class Observation(astromon.observation.Observation):
             f"{events_file}[cols time,ra,dec,x,y]",
             outfile,
             clobber="yes",
+            logging_tag=str(self),
         )
         events = table.Table.read(outfile, hdu=1)
         events["yag"], events["zag"] = radec_to_yagzag(events["RA"], events["DEC"], att)
@@ -631,7 +632,7 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
         sel = (matches[bin_col] < xmax) & (matches[bin_col] >= xmin)
         if np.count_nonzero(sel) < 10:
             logger.debug(
-                f"Not enough points in bin {xmin} < {bin_col} < {xmax} ({np.count_nonzero})"
+                f"OBSID={obs.obsid}, {src_id=}: Not enough points in bin {xmin} < {bin_col} < {xmax} ({np.count_nonzero})"
             )
             continue
 
@@ -657,21 +658,21 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
         ok = True
         if np.any(np.isnan(H)) or np.any(np.isinf(H)):
             logger.debug(
-                f"Hessian has Nan or inf entries ({xmin} < {bin_col} < {xmax})"
+                f"OBSID={obs.obsid}, {src_id=}: Hessian has Nan or inf entries ({xmin} < {bin_col} < {xmax})"
             )
             ok = False
         if scipy.linalg.det(H) == 0.0:
-            logger.debug(f"singular hessian matrix ({xmin} < {bin_col} < {xmax})")
+            logger.debug(f"OBSID={obs.obsid}, {src_id=}: singular hessian matrix ({xmin} < {bin_col} < {xmax})")
             ok = False
         if not scipy.linalg.issymmetric(H):
-            logger.debug(f"Hessian is not symmetric ({xmin} < {bin_col} < {xmax})")
+            logger.debug(f"OBSID={obs.obsid}, {src_id=}: Hessian is not symmetric ({xmin} < {bin_col} < {xmax})")
             ok = False
 
         if ok:
             covariance = scipy.linalg.inv(H)
             if np.any(np.diagonal(covariance) < 0):
                 logger.debug(
-                    f"fCovariance has negative diagonal values ({xmin} < {bin_col} < {xmax})"
+                    f"OBSID={obs.obsid}, {src_id=}: Covariance has negative diagonal values ({xmin} < {bin_col} < {xmax})"
                 )
                 ok = False
 

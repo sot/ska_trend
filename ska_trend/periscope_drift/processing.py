@@ -75,7 +75,7 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
     log_level : str
         Logging level. One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
     """
-    logger = basic_logger("astromon", level=log_level)
+    logger = basic_logger("periscope_drift", level=log_level)
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="A coordinate frame was not found for region"
@@ -244,11 +244,15 @@ def process_interval(
     )
 
     # obsids = [result["obsid"] for result in results if result["ok"]]
-    errors = [(r["obsid"], r["msg"]) for r in results if not r["ok"]]
+    errors = {str(r["obsid"]): r["msg"] for r in results if not r["ok"]}
     observations = {}
     summary = []
-    for obsid in tqdm(obsids):
+    obsid_iter = tqdm(obsids) if show_progress else obsids
+    for obsid in obsid_iter:
         obs = observation.Observation(obsid, archive_dir=archive_dir, workdir=workdir)
+
+        if obs.obsid in errors:
+            continue
 
         if not obs.is_selected():
             continue
@@ -268,7 +272,7 @@ def process_interval(
         except astromon.observation.SkippedWithWarning:
             pass
         except Exception as exc:
-            errors.append((obs.obsid, str(exc)))
+            errors[obs.obsid] = str(exc)
 
     logger.debug(
         f"Processed {len(obsids)} observations with {len(summary)} sources and {len(errors)} errors"

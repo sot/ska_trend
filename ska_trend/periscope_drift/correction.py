@@ -4,13 +4,8 @@ Periscope Drift Correction
 This module contains the function and constants used to correct the periscope drift.
 """
 
-import logging
-
 import numpy as np
 import scipy
-
-logger = logging.getLogger("periscope_drift")
-
 
 __all__ = [
     "GRADIENTS",

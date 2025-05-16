@@ -2,11 +2,9 @@
 Top-level functions to generate HTML reports for periscope drift trending.
 """
 
-import logging
 from pathlib import Path
 
 import jinja2
-from tqdm import tqdm
 
 from ska_trend.periscope_drift import plotly as plots
 
@@ -23,10 +21,7 @@ JINJA_ENV = jinja2.Environment(
 )
 
 
-logger = logging.getLogger("periscope_drift")
-
-
-def write_html_report(outdir, observations, sources):
+def write_html_report(outdir, observations, sources, overwrite=False):
     """
     Render and write the main page.
 
@@ -45,7 +40,7 @@ def write_html_report(outdir, observations, sources):
 
     # the sources
     source_files = []
-    for obsid, src_id in tqdm(sources["obsid", "id"]):
+    for obsid, src_id in sources["obsid", "id"]:
         obs = observations[str(obsid)]
         src_file = (
             Path("sources")
@@ -55,7 +50,7 @@ def write_html_report(outdir, observations, sources):
             / "index.html"
         )
         src_file.parent.mkdir(exist_ok=True, parents=True)
-        write_source_html_report(obs, src_id, outdir / src_file)
+        write_source_html_report(obs, src_id, outdir / src_file, overwrite=overwrite)
         source_files.append(str(src_file))
 
     sources["filename"] = source_files

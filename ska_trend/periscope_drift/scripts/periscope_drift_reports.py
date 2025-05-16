@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import logging
 import os
 import re
 import sys
@@ -12,10 +13,7 @@ from cxotime import units as u
 
 from ska_trend.periscope_drift import processing, reports
 
-logger = ska_helpers.logging.basic_logger(
-    "periscope_drift_reports", level="WARNING", format="%(message)s"
-)
-
+logger = logging.getLogger("periscope_drift")
 
 def get_parser():
     parser = argparse.ArgumentParser()
@@ -62,32 +60,26 @@ def get_parser():
         type=Path,
         help="Log file. If not specified, log to stdout.",
     )
+    parser.add_argument(
+        "--show-progress",
+        action="store_true",
+        help="Show progress bar",
+    )
     return parser
 
 
 def main():
     args = get_parser().parse_args()
 
-    if args.log_file is not None:
-        filename = args.log_file
-        stream = None
-    else:
-        filename = None
-        stream = sys.stdout
-
-    logger = ska_helpers.logging.basic_logger(
-        "astromon",
-        level=args.log_level.upper(),
-        format="%(message)s",
-        stream=stream,
+    log_args = {
+        "level": args.log_level.upper(),
+        "format": "%(message)s",
+    }
+    logger = ska_helpers.logging.basic_logger("periscope_drift", **log_args)
+    log_args.update(
+        {"stream": sys.stdout} if args.log_file is None else {"filename": args.log_file}
     )
-
-    logger = ska_helpers.logging.basic_logger(
-        "periscope_drift_reports",
-        level=args.log_level.upper(),
-        format="%(message)s",
-        stream=stream,
-    )
+    ska_helpers.logging.basic_logger("astromon", **log_args)
 
     now = CxoTime()
     logger.info(
@@ -107,7 +99,7 @@ def main():
         archive_dir=args.archive_dir,
         workdir=args.workdir,
         log_level=args.log_level,
-        show_progress=False,
+        show_progress=args.show_progress,
     )
 
     reports.write_html_report(args.output, observations, sources)
