@@ -148,5 +148,6 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
         plot_3d_figure_zag=plots.get_plot_3d_figure(src_pdd, "zag").to_html(**kwargs),
         ocat=ocat,
     )
+    filename.parent.mkdir(exist_ok=True, parents=True)
     with open(filename, "w") as fh:
         fh.write(page)
