@@ -21,7 +21,7 @@ DOC_ID = "1GoYBTIQAv0qq2vh3jYxHBYHfEq2I8LVGMiScDX7OFvw"
 GID = "1266351479"
 url_start = "https://docs.google.com/spreadsheets/d"
 GSHEET_URL = f"{url_start}/{DOC_ID}/export?format=csv&id={DOC_ID}&gid={GID}"
-GSHEET_USER_URL = f"{url_start}/{DOC_ID}/edit?usp=sharing"
+GSHEET_USER_URL = f"{url_start}/{DOC_ID}/edit?gid={GID}#gid={GID}"
 
 # Constants and file path definitions
 FILE_DIR = Path(__file__).parent
