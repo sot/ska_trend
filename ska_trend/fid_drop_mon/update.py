@@ -4,6 +4,7 @@ from pathlib import Path
 
 import astropy.units as u
 import jinja2
+import kadi.commands as kc
 import numpy as np
 from acdc.common import send_mail
 from astropy.table import Table, join, vstack
@@ -56,29 +57,54 @@ def get_opt():
     return parser
 
 
-def get_scs107_intervals(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
+def get_vehicle_only_intervals(
+    start: CxoTimeLike = None, stop: CxoTimeLike = None
+) -> Table:
     """
-    Get the SCS107 SOSA intervals from the telemetry.
+    Get intervals where only vehicle loads are running following SCS-107.
 
-    This is only valid after SOSA start in 2011.
+    This uses kadi commands to return the intervals that start with the SCS-107
+    date and stop at the first command in SCS 131, 132 or 133 after SCS-107.
+    This only includes pure SCS-107 events and not other safing actions like NSM
+    that call SCS-107 (since those events also stop the vehicle loads).
+
+    Prior to the start of SOSA (2011:335), both vehicle and observing loads
+    were stopped by SCS-107, so this function returns no intervals prior
+    to the start of SOSA.
 
     Parameters
     ----------
     start : CxoTimeLike
-        Start time for the data to be fetched.
+        Start time for intervals, where ``start`` must be before
+        (or equal to) the start time of the SCS-107 run.
     stop : CxoTimeLike
-        Stop time for the data to be fetched.
+        Stop time for intervals, where ``stop`` must be after
+        the start time of the SCS-107 run.
 
     Returns
     -------
     Table
-        Table of SCS107 SOSA intervals.
+        Table of vehicle-only SOSA intervals.
 
     The returned table has the following columns:
         - datestart: Start time of the interval.
-        - datestop: Stop time of the interval.
+        - datestop: Stop time of the interval (time of first observing command).
     """
-    import kadi.commands as kc
+    sosa_patch = CxoTime("2011:335")
+    stop = CxoTime(stop) if stop is not None else CxoTime()
+    start = sosa_patch if start is None else CxoTime(start)
+
+    if start < sosa_patch:
+        raise ValueError(
+            f"Start time {start} must be after SOSA patch start time {sosa_patch}"
+        )
+
+    cmds = kc.get_cmds(start=start)
+    ok = (cmds["tlmsid"] == "OORMPDS") & (cmds["source"] == "CMD_EVT")
+    cmds_rmpds_evt = cmds[ok]
+    ok2 = cmds_rmpds_evt["event"] == "SCS-107"
+    cmd_dates_scs107 = [cmd["date"] for cmd in cmds_rmpds_evt[ok2]]
+    cmd_dates_sci = cmds["date"][np.in1d(cmds["scs"], [131, 132, 133])]
 
     # Manually add some SCS107s before cmd event sheet
     scs107_dates = [
@@ -102,32 +128,19 @@ def get_scs107_intervals(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
         "2012:023:06:00:38.000",
     ]
 
-    sosa_patch = "2011:335"
-    min_cmd_start = np.min([CxoTime(start), CxoTime(sosa_patch)])
-    cmds = kc.get_cmds(start=min_cmd_start)
-    ok = (cmds["tlmsid"] == "OORMPDS") & (cmds["source"] == "CMD_EVT")
-    cmds_rmpds_evt = cmds[ok]
-    ok2 = cmds_rmpds_evt["event"] == "SCS-107"
-    cmd_dates_scs107 = [cmd["date"] for cmd in cmds_rmpds_evt[ok2]]
-    ok_sci_cmds = (cmds["source"] != "CMD_EVT") & (
-        np.in1d(cmds["scs"], [131, 132, 133])
-    )
-
     scs107_dates.extend(cmd_dates_scs107)
     scs107_dates = sorted(set(scs107_dates))
+    # Filter dates outside start/stop range
+    scs107_dates = [date for date in scs107_dates if start <= CxoTime(date) <= stop]
 
     scs107_intervals = []
-
-    for date in scs107_dates:
+    for scs107_date in scs107_dates:
         # Get the date of the next command that has a source that isn't "CMD_EVT"
-        idx = np.searchsorted(cmds[ok_sci_cmds]["date"], date)
-        if idx == len(cmds[ok_sci_cmds]):
-            datestop = stop
-        else:
-            datestop = cmds[ok_sci_cmds]["date"][idx]
+        idx = np.searchsorted(cmd_dates_sci, scs107_date)
+        datestop = cmd_dates_sci[idx] if idx != len(cmd_dates_sci) else stop.date
         scs107_intervals.append(
             {
-                "datestart": date,
+                "datestart": scs107_date,
                 "datestop": datestop,
             }
         )
@@ -171,7 +184,7 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
     obss = get_observations(start=start - 5 * u.day)
     obs_start_dates = [obs["obs_start"] for obs in obss]
 
-    scs107_intervals = get_scs107_intervals(start, stop)
+    scs107_intervals = get_vehicle_only_intervals(start, stop)
 
     fid_data = []
     for i, manvr in enumerate(manvrs):
