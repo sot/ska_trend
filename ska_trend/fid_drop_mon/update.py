@@ -301,7 +301,7 @@ def main(args=None):
     fid_data_archive = None
     min_table_start = "2011:335"
 
-    if Path(fid_data_file).exists():
+    if fid_data_file.exists():
         fid_data_archive = Table.read(fid_data_file, format="ascii.ecsv")
         start = CxoTime(fid_data_archive["start"][-1]) + 10 * u.s
     else:
