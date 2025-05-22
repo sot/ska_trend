@@ -79,7 +79,7 @@ def get_vehicle_only_intervals(
         (or equal to) the start time of the SCS-107 run. If ``None``, the
         start time is set to the SOSA patch start time (2011:335).
     stop : CxoTimeLike
-        Stop time for intervals, where ``stop`` must be after
+        Stop time filter for intervals, where ``stop`` must be after
         the start time of the SCS-107 run. If ``None``, the stop time is set
         to the current time.
 
@@ -97,6 +97,8 @@ def get_vehicle_only_intervals(
     start = sosa_patch if start is None else np.max([CxoTime(start), sosa_patch])
 
     cmds = kc.get_cmds(start=start)
+    # This filters on tlmsid and source first because that's fast.
+    # Then those cmds are filtered by the SCS-107 event type.
     ok = (cmds["tlmsid"] == "OORMPDS") & (cmds["source"] == "CMD_EVT")
     cmds_rmpds_evt = cmds[ok]
     ok2 = cmds_rmpds_evt["event"] == "SCS-107"
