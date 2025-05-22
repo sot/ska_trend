@@ -75,11 +75,13 @@ def get_vehicle_only_intervals(
     Parameters
     ----------
     start : CxoTimeLike
-        Start time for intervals, where ``start`` must be before
-        (or equal to) the start time of the SCS-107 run.
+        Start time filter for intervals, where ``start`` must be before
+        (or equal to) the start time of the SCS-107 run. If ``None``, the
+        start time is set to the SOSA patch start time (2011:335).
     stop : CxoTimeLike
         Stop time for intervals, where ``stop`` must be after
-        the start time of the SCS-107 run.
+        the start time of the SCS-107 run. If ``None``, the stop time is set
+        to the current time.
 
     Returns
     -------
@@ -91,13 +93,8 @@ def get_vehicle_only_intervals(
         - datestop: Stop time of the interval (time of first observing command).
     """
     sosa_patch = CxoTime("2011:335")
-    stop = CxoTime(stop) if stop is not None else CxoTime()
-    start = sosa_patch if start is None else CxoTime(start)
-
-    if start < sosa_patch:
-        raise ValueError(
-            f"Start time {start} must be after SOSA patch start time {sosa_patch}"
-        )
+    stop = CxoTime(stop) if stop is not None else CxoTime.now()
+    start = sosa_patch if start is None else np.max([CxoTime(start), sosa_patch])
 
     cmds = kc.get_cmds(start=start)
     ok = (cmds["tlmsid"] == "OORMPDS") & (cmds["source"] == "CMD_EVT")
