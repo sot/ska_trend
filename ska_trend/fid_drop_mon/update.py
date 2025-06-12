@@ -217,7 +217,7 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
             npnt_stop = row["datestop"]
 
             # If the start of the interval is within an SCS107 interval, skip this row
-            if np.any(
+            if (len(scs107_intervals) > 0) and np.any(
                 (CxoTime(npnt_start) >= CxoTime(scs107_intervals["datestart"]))
                 & (CxoTime(npnt_start) <= CxoTime(scs107_intervals["datestop"]))
             ):
