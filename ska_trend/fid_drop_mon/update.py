@@ -210,6 +210,12 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
 
         # Break up the manvr steady interval into NPNT intervals if needed
         aopcadmd = fetch.Msid("AOPCADMD", manvr.kalman_start, manvr.next_nman_start)
+        if not np.any(aopcadmd.vals == "NPNT"):
+            LOGGER.warning(
+                "No NPNT intervals found in AOPCADMD for manvr"
+                f" {manvr.kalman_start} to {manvr.next_nman_start}"
+            )
+            continue
         npnt = logical_intervals(aopcadmd.times, aopcadmd.vals == "NPNT")
 
         for row in npnt:
@@ -217,7 +223,7 @@ def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
             npnt_stop = row["datestop"]
 
             # If the start of the interval is within an SCS107 interval, skip this row
-            if np.any(
+            if (len(scs107_intervals) > 0) and np.any(
                 (CxoTime(npnt_start) >= CxoTime(scs107_intervals["datestart"]))
                 & (CxoTime(npnt_start) <= CxoTime(scs107_intervals["datestop"]))
             ):
