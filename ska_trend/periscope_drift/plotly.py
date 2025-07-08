@@ -13,7 +13,6 @@ from astropy.table import Table
 from plotly.subplots import make_subplots
 
 from ska_trend.periscope_drift import observation
-from ska_trend.periscope_drift.reports import expected_corr
 
 # x-rays within dr around the source are included in the fit
 DR = 4
@@ -707,6 +706,9 @@ def scatter_plots(matches):
 
 
 def plot(obs, periscope_drift_data, src_id):
+
+    from ska_trend.periscope_drift.reports import expected_corr  # noqa: PLC0415
+
     cols = [
         "obsid",
         "id",
