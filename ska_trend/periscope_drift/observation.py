@@ -279,6 +279,34 @@ class PeriscopeDriftData:
 
         return src
 
+    @stored_result("periscope_drift_summary", fmt="pickle", subdir="cache")
+    def get_summary(self):
+        obspar = self.obs.get_obspar()
+        tstart = float(obspar["tstart"])
+        tstop = float(obspar["tstop"])
+        telem = fetch_telemetry( CxoTime(tstart), CxoTime(tstop) )
+        correction = get_expected_correction(telem)
+
+        # maybe the corresponding stuff in get_sources should be removed
+        info = {
+            key: obspar[key]
+            for key in [
+                "obsid", "date_obs", "tstart", "tstop", "instrument", "grating",
+                "ra_targ", "dec_targ", "ra_nom", "dec_nom", "roll_nom", "ra_pnt", "dec_pnt",
+                "roll_pnt", "obs_mode",
+            ]
+        }
+        info.update({
+            "obsid_selected": self.is_selected(),
+            "OOBAGRD_corr_angle": correction["OOBAGRD_corr_angle"],
+            "tstart": tstart,
+            "tstop": tstop,
+            "datamode": obspar.get("datamode", ""),
+            "readmode": obspar.get("readmode", ""),
+            "dtycycle": obspar.get("dtycycle", -1)
+        })
+        return info
+
     @stored_result("periscope_drift_data", fmt="pickle", subdir="cache")
     def get_periscope_drift_data(self):
         src = self.get_sources()
@@ -289,14 +317,7 @@ class PeriscopeDriftData:
         )
         correction = get_expected_correction(telem)
 
-        # maybe this should be a separate method and the corresponding stuff in get_sources should
-        # be removed
-        info = {
-            "obsid": self.obs.obsid,
-            "tstart": float(self.obs.get_obspar()["tstart"]),
-            "tstop": float(self.obs.get_obspar()["tstop"]),
-            "OOBAGRD_corr_angle": correction["OOBAGRD_corr_angle"],
-        }
+        info = self.get_summary()
 
         # process all sources
         binned_data = {
