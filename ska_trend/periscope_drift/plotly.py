@@ -1555,9 +1555,12 @@ def get_drift_figure(sources):
         col=2,
     )
 
-    ax_max = max(
-        1.1 * max(sources["drift_expected"].max(), sources["drift_actual"].max()), 1.5
-    )
+    if len(sources) > 1:
+        ax_max = max(
+            1.1 * max(sources["drift_expected"].max(), sources["drift_actual"].max()), 1.5
+        )
+    else:
+        ax_max = 3.0
     axis_range = [0, ax_max]
     fig.update_xaxes(
         {
