@@ -24,63 +24,24 @@ JINJA_ENV = jinja2.Environment(
 )
 
 
-def write_html_report(start, stop, outdir, observations, sources, overwrite=False):
+def get_data_for_interval(start, stop, observations, sources, idx=0):
     """
     Render and write the main page.
 
     Parameters
     ----------
-    outdir : str or Path
-        Output directory.
     observations : list
         List of observations.
     sources : Table
         Table of sources.
     """
 
-    outdir = Path(outdir)
-    outdir.mkdir(exist_ok=True, parents=True)
-
-    # this string is used in the template to link to the source report
-    # it should match what is done below for src_file
-    source_report_path = (
-        "`sources/${String(Math.floor(Number(obsid) / 1e3)).padStart(2, '0')}"
-        "/${obsid}/${src_id}/index.html`"
-    )
-
-    context = {"source_report_path": source_report_path}
-
-    # the sources
-    source_files = []
-    for obsid, src_id in sources["obsid", "id"]:
-        obs = observations[str(obsid)]
-        src_file = (
-            Path("sources")
-            / f"{float(obsid) // 1e3:02.0f}"
-            / f"{obsid}"
-            / str(src_id)
-            / "index.html"
-        )
-        src_file.parent.mkdir(exist_ok=True, parents=True)
-        write_source_html_report(obs, src_id, outdir / src_file, overwrite=overwrite)
-        source_files.append(str(src_file))
-
-    sources["filename"] = source_files
-
-    with open(outdir / "sources" / "all.json", "w") as fh:
-        json.dump(
-            sources[["obsid", "src_id", "filename"]].as_array().tolist(), fh, indent=2
-        )
-
-    # the main page
-    filename = outdir / "index.html"
-
-    template = JINJA_ENV.get_template("index.html")
-
-    kwargs = {
-        "full_html": False,
-        "include_plotlyjs": "cdn",
+    observations = {
+        key: obs for key, obs in observations.items()
+        if obs.get_info()["date_obs"] < stop
+        and obs.get_info()["date_obs"] >= start
     }
+    sources = sources[(sources["tstart"] < stop) & (sources["tstart"] >= start)]
 
     large_exp_drift_sources = sources.copy()
     large_exp_drift_sources = large_exp_drift_sources[
@@ -129,39 +90,111 @@ def write_html_report(start, stop, outdir, observations, sources, overwrite=Fals
         {
             "id": "expected_drift",
             "title": "Sources with large expected drift (> 0.4)",
-            "sources": large_exp_drift_sources,
+            "sources": large_exp_drift_sources[:20],
         }
     )
     source_tables.append(
         {
             "id": "actual_drift",
             "title": "Sources with large drift (> 0.4)",
-            "sources": large_drift_sources,
+            "sources": large_drift_sources[:20],
         }
     )
     source_tables.append(
         {
             "id": "p_value",
             "title": "Sources inconsistent with null hypothesis (p-value < 0.01)",
-            "sources": poor_fit_sources,
+            "sources": poor_fit_sources[:20],
         }
     )
 
+    kwargs = {
+        "full_html": False,
+        "include_plotlyjs": "cdn",
+    }
+
+    result = {
+        "start": start.date[:8],
+        "stop": stop.date[:8],
+        "start_iso": start.iso[:10],
+        "stop_iso": stop.iso[:10],
+        "chi2_figure": plots.get_chi2_figure(sources).to_html(
+            div_id=f"chi2_figure_{idx}", **kwargs
+        ),
+        "p_value_figure": plots.get_p_value_figure(sources).to_html(
+            div_id=f"p_value_figure_{idx}", **kwargs
+        ),
+        "drift_figure": plots.get_drift_figure(sources).to_html(
+            div_id=f"drift_figure_{idx}", **kwargs
+        ),
+        "tables": source_tables,
+    }
+    return result
+
+
+def write_html_report(time_ranges, outdir, observations, sources, overwrite=False):
+    """
+    Render and write the main page.
+
+    Parameters
+    ----------
+    outdir : str or Path
+        Output directory.
+    observations : list
+        List of observations.
+    sources : Table
+        Table of sources.
+    """
+
+    outdir = Path(outdir)
+    outdir.mkdir(exist_ok=True, parents=True)
+
+    # this string is used in the template to link to the source report
+    # it should match what is done below for src_file
+    source_report_path = (
+        "`sources/${String(Math.floor(Number(obsid) / 1e3)).padStart(2, '0')}"
+        "/${obsid}/${src_id}/index.html`"
+    )
+
+    context = {"source_report_path": source_report_path}
+
+    # the sources
+    source_files = []
+    for obsid, src_id in sources["obsid", "id"]:
+        obs = observations[str(obsid)]
+        src_file = (
+            Path("sources")
+            / f"{float(obsid) // 1e3:02.0f}"
+            / f"{obsid}"
+            / str(src_id)
+            / "index.html"
+        )
+        src_file.parent.mkdir(exist_ok=True, parents=True)
+        write_source_html_report(obs, src_id, outdir / src_file, overwrite=overwrite)
+        source_files.append(str(src_file))
+
+    sources["filename"] = source_files
+
+    with open(outdir / "sources" / "all.json", "w") as fh:
+        json.dump(
+            sources[["obsid", "src_id", "filename"]].as_array().tolist(), fh, indent=2
+        )
+
+    # the main page
+    range_data = [
+        get_data_for_interval(
+            tr["start"], tr["stop"], observations=observations, sources=sources, idx=idx
+        )
+        for idx, tr in enumerate(time_ranges)
+    ]
+    for rd, tr in zip(range_data, time_ranges, strict=True):
+        rd["title"] = tr["title"]
+
+    filename = outdir / "index.html"
+    template = JINJA_ENV.get_template("index.html")
+
     page = template.render(
-        start=start.date[:8],
-        stop=stop.date[:8],
-        start_iso=start.iso[:10],
-        stop_iso=stop.iso[:10],
-        chi2_figure=plots.get_chi2_figure(sources).to_html(
-            div_id="chi2_figure", **kwargs
-        ),
-        p_value_figure=plots.get_p_value_figure(sources).to_html(
-            div_id="p_value_figure", **kwargs
-        ),
-        drift_figure=plots.get_drift_figure(sources).to_html(
-            div_id="drift_figure", **kwargs
-        ),
-        tables=source_tables,
+        time_ranges=range_data,
         context=context,
     )
     with open(filename, "w") as fh:
