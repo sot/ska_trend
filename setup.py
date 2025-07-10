@@ -47,6 +47,7 @@ setup(
         "ska_trend.periscope_drift": [
             "task_schedule.cfg",
             "templates/periscope_drift/index.html",
+            "templates/periscope_drift/source_report.html",
         ],
     },
 )
