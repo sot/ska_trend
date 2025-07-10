@@ -29,93 +29,107 @@
 		<!--#include virtual="/incl/header.html"-->
 	</div>
 
-  <div class="container-md">
-    <h2> Periscope Trending Report </h2>
+	<div class="container-md">
+		<h2> Periscope Trending Report </h2>
 
-	<table class="table">
-		<tbody>
-			<tr>
-				<th>Start</th> <td>{{ start }} ({{ start_iso }})</td>
-			</tr>
-			<tr>
-				<th>Stop</th> <td>{{ stop }} ({{ stop_iso }})</td>
-			</tr>
-		</tbody>
-	</table>
+		<ul class="nav nav-tabs" role="tablist">
+			{% for time_range in time_ranges %}
+			<li class="nav-item" role="presentation">
+			<a class="nav-link{% if loop.index == 1 %} active{% endif %}" id="tab-{{ loop.index }}" data-bs-toggle="tab" href="#simple-tabpanel-{{ loop.index }}" role="tab" aria-controls="simple-tabpanel-{{ loop.index }}" aria-selected={% if loop.index == 1 %}"true"{% else %}"false"{% endif %}>{{ time_range.title }}</a>
+			</li>
+			{% endfor %}
+		</ul>
+		<div class="tab-content pt-5" id="tab-content">
+			{% for time_range in time_ranges %}
+			<div class="tab-pane active" id="simple-tabpanel-{{ loop.index }}" role="tabpanel" aria-labelledby="tab-{{ loop.index }}">
+				<table class="table">
+					<tbody>
+						<tr>
+							<th>Start</th> <td>{{ time_range.start }} ({{ time_range.start_iso }})</td>
+						</tr>
+						<tr>
+							<th>Stop</th> <td>{{ time_range.stop }} ({{ time_range.stop_iso }})</td>
+						</tr>
+					</tbody>
+				</table>
 
-	<h3> Drift </h3>
-    <div class="ratio" style="--bs-aspect-ratio: 40%;">
-      {{drift_figure}}
-    </div>
+				<h3> Drift </h3>
+				<div class="ratio" style="--bs-aspect-ratio: 40%;">
+				{{time_range.drift_figure}}
+				</div>
 
-	<h3> Chi2 </h3>
-    <div class="ratio" style="--bs-aspect-ratio: 40%;">
-		{{chi2_figure}}
-    </div>
-	
-	<h3> p-value </h3>
-    <div class="ratio" style="--bs-aspect-ratio: 40%;">
-		{{p_value_figure}}
-    </div>
-	
-	<h3> Selected Sources </h3>
+				<h3> Chi2 </h3>
+				<div class="ratio" style="--bs-aspect-ratio: 40%;">
+					{{time_range.chi2_figure}}
+				</div>
 
-	{% for table in tables %}
-	<div class="accordion" id="sourceTablesAccordion">
-      <div class="accordion-item">
-        <h2 class="accordion-header" id="heading_{{ table.id }}">
-          <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse_{{ table.id }}" aria-expanded="true" aria-controls="collapse_{{ table.id }}">
-            {{ table.title }}
-          </button>
-        </h2>
-        <div id="collapse_{{ table.id }}" class="accordion-collapse collapse show" aria-labelledby="heading_{{ table.id }}" data-bs-parent="#sourceTablesAccordion">
-          <div class="accordion-body">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>OBSID</th>
-						<th>src</th>
-						<th colspan="2">expected drift (arcsec)</th>
-						<th colspan="2">drift residual (arcsec)</th>
-						<th colspan="2">chi2</th>
-						<th colspan="2">p_value</th>
-					</tr>
-					<tr>
-						<th></th>
-						<th></th>
-						<th>yag</th>
-						<th>zag</th>
-						<th>yag</th>
-						<th>zag</th>
-						<th>yag</th>
-						<th>zag</th>
-						<th>yag</th>
-						<th>zag</th>
-					</tr>
-				</thead>
-				<tbody>
-					{% for row in table.sources %}
-					<tr>
-						<td><a href="{{row.filename}}">{{row.obsid}}</a></td>
-						<td>{{row.id}}</td>
-						<td>{{'{:.2f}'.format(row.drift_yag_expected)}}</td>
-						<td>{{'{:.2f}'.format(row.drift_zag_expected)}}</td>
-						<td>{{'{:.2f}'.format(row.drift_yag_residual)}}</td>
-						<td>{{'{:.2f}'.format(row.drift_zag_residual)}}</td>
-						<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_yag_null_chi2_corr)}}</td>
-						<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_zag_null_chi2_corr)}}</td>
-						<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_yag_null_p_value_corr)}}</td>
-						<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_zag_null_p_value_corr)}}</td>
-					</tr>
-					{% endfor %}
-				</tbody>
-			</table>
-          </div>
-        </div>
-      </div>
-    </div>
-	{% endfor %}
+				<h3> p-value </h3>
+				<div class="ratio" style="--bs-aspect-ratio: 40%;">
+					{{time_range.p_value_figure}}
+				</div>
 
+				<h3> Selected Sources </h3>
+
+				{% for table in time_range.tables %}
+				<div class="accordion" id="sourceTablesAccordion">
+				<div class="accordion-item">
+					<h2 class="accordion-header" id="heading_{{ table.id }}">
+					<button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse_{{ table.id }}" aria-expanded="true" aria-controls="collapse_{{ table.id }}">
+						{{ table.title }}
+					</button>
+					</h2>
+					<div id="collapse_{{ table.id }}" class="accordion-collapse collapse show" aria-labelledby="heading_{{ table.id }}" data-bs-parent="#sourceTablesAccordion">
+					<div class="accordion-body">
+						<table class="table">
+							<thead>
+								<tr>
+									<th>OBSID</th>
+									<th>src</th>
+									<th colspan="2">expected drift (arcsec)</th>
+									<th colspan="2">drift residual (arcsec)</th>
+									<th colspan="2">chi2</th>
+									<th colspan="2">p_value</th>
+								</tr>
+								<tr>
+									<th></th>
+									<th></th>
+									<th>yag</th>
+									<th>zag</th>
+									<th>yag</th>
+									<th>zag</th>
+									<th>yag</th>
+									<th>zag</th>
+									<th>yag</th>
+									<th>zag</th>
+								</tr>
+							</thead>
+							<tbody>
+								{% for row in table.sources %}
+								<tr>
+									<td><a href="{{row.filename}}">{{row.obsid}}</a></td>
+									<td>{{row.id}}</td>
+									<td>{{'{:.2f}'.format(row.drift_yag_expected)}}</td>
+									<td>{{'{:.2f}'.format(row.drift_zag_expected)}}</td>
+									<td>{{'{:.2f}'.format(row.drift_yag_residual)}}</td>
+									<td>{{'{:.2f}'.format(row.drift_zag_residual)}}</td>
+									<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_yag_null_chi2_corr)}}</td>
+									<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_zag_null_chi2_corr)}}</td>
+									<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_yag_null_p_value_corr)}}</td>
+									<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_zag_null_p_value_corr)}}</td>
+								</tr>
+								{% endfor %}
+							</tbody>
+						</table>
+					</div>
+					</div>
+				</div>
+				</div>
+				{% endfor %}
+
+			</div>
+			{% endfor %}
+		</div>
+	</div>
 
   <script
     src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
@@ -123,9 +137,10 @@
     crossorigin="anonymous">
   </script>
 
+  {% for time_range in time_ranges %}
   <script>
 	// the figure ID is set in the to_html method of the plotly figure using `div_id=...`
-	var myPlot = document.getElementById('drift_figure');
+	var myPlot = document.getElementById('drift_figure_{{ loop.index - 1 }}');
 
 	myPlot.on('plotly_click', function(data) {
 		// this function requires:
@@ -151,6 +166,7 @@
 		window.open(path, '_blank');
 	});
   </script>
+  {% endfor %}
 
 </body>
 </html>

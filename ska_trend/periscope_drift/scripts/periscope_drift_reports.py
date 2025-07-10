@@ -25,7 +25,7 @@ def get_parser():
         type=Path,
         help="Output directory",
     )
-    parser.add_argument("--start", default="-90d")
+    parser.add_argument("--start", default="-365d")
     parser.add_argument("--stop", default=None)
     parser.add_argument(
         "--workdir",
@@ -113,7 +113,16 @@ def main():
         json.dump(errors, fh)
 
     if not args.no_output:
-        reports.write_html_report(start, stop, args.output, observations, sources)
+        time_ranges = [
+            {"start": stop - 30 * u.day, "stop": stop, "title": "30 days"},
+            {"start": stop - 90 * u.day, "stop": stop, "title": "90 days"},
+        ]
+        if (stop - start > 90 * u.day):
+            time_ranges.append({"start": stop - 365 * u.day, "stop": stop, "title": "1 year"})
+        if (stop - start > 365 * u.day):
+            time_ranges.append({"start": stop - 5 * 365 * u.day, "stop": stop, "title": "5 year"})
+
+        reports.write_html_report(time_ranges, args.output, observations, sources)
 
         with open(args.output / "sources.json", "w") as fh:
             json.dump(sources.to_pandas().to_json(), fh)
