@@ -18,6 +18,7 @@ import scipy
 import scipy.interpolate
 import ska_numpy
 from astromon.stored_result import stored_result
+from astromon.task import ReturnCode, run_tasks
 from astropy import table
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -128,6 +129,20 @@ class PeriscopeDriftData:
         )
 
     def get_events(self):
+        # THIS IS A HACK: the "dependencies" decorator does not work on PeriscopeDriftData
+        # instances, only on Observation instances.
+        rv = run_tasks(obs=self.obs, task_names=["filter_events"])
+
+        errors = {
+            name: value for name, value in rv.items()
+            if value.return_code.value >= ReturnCode.ERROR.value
+        }
+        if errors:
+            msg = ", ".join(f"{name} {value.msg}" for name, value in errors.items())
+            raise RuntimeError(
+                f"PeriscopeDriftData.get_events failed. Dependency tasks failed: {msg}"
+            )
+
         # get events
         obs_info = self.obs.get_info()
         att = Quat([obs_info["ra_nom"], obs_info["dec_nom"], obs_info["roll_nom"]])
@@ -181,13 +196,11 @@ class PeriscopeDriftData:
 
     @stored_result("periscope_drift_sources", fmt="table", subdir="cache")
     def get_sources(self, apply_filter=True):
-        # this is a hack, because we "know" that the source file is not there
-        # we should not have to know this.
-        if not self.obs.file_path(f"sources/{self.obs.obsid}_celldetect.src").exists():
+        src = self.obs.get_sources(version="celldetect")
+
+        if len(src) == 0:
             # and we use ID often to traverse the table... so make sure the column exists
             return table.Table(dtype=[("id", int)])
-
-        src = self.obs.get_sources()
 
         obs_info = self.obs.get_info()
         att = Quat([obs_info["ra_nom"], obs_info["dec_nom"], obs_info["roll_nom"]])
