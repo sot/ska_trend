@@ -29,7 +29,6 @@ def get_parser():
     parser.add_argument("--stop", default=None)
     parser.add_argument(
         "--workdir",
-        default=Path("/data/aca/periscope_drift/work"),
         type=Path,
         help="Working directory",
     )
