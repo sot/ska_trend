@@ -101,29 +101,9 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
             )
 
             if obs.periscope_drift.is_selected():
-                return_values = obs.process()
-                failures = {
-                    name: rv
-                    for name, rv in return_values.items()
-                    if rv.return_code.value
-                    >= astromon.observation.ReturnCode.ERROR.value
-                }
-                skipped = {
-                    name: rv
-                    for name, rv in return_values.items()
-                    if rv.return_code.value
-                    in [
-                        astromon.observation.ReturnCode.SKIP.value,
-                        astromon.observation.ReturnCode.WARNING.value,
-                    ]
-                }
-                if failures:
-                    ok = False
-                    msg = ", ".join([rv.message for rv in failures.values()])
-                    msg = f"OBSID={obs.obsid} FAIL - {msg}"
-                elif not skipped:
-                    obs.periscope_drift.get_sources()
-                    obs.periscope_drift.get_periscope_drift_data()
+                obs.periscope_drift.get_sources()
+                obs.periscope_drift.get_sources(apply_filter=False)
+                obs.periscope_drift.get_periscope_drift_data()
         except CiaoProcessFailure as exc:
             ok = False
             exc_type, exc_value, exc_traceback = sys.exc_info()
