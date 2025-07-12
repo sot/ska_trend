@@ -108,8 +108,9 @@ def main():
         show_progress=args.show_progress,
     )
 
-    with open(args.workdir / "errors.json", "w") as fh:
-        json.dump(errors, fh)
+    if args.workdir is not None:
+        with open(args.workdir / "errors.json", "w") as fh:
+            json.dump(errors, fh)
 
     if not args.no_output:
         time_ranges = [
