@@ -36,12 +36,13 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
         Table of sources.
     """
 
+    tstart = [observations[f"{obs}"].get_info()["tstart"] for obs in sources["obsid"]]
     observations = {
         key: obs for key, obs in observations.items()
         if obs.get_info()["date_obs"] < stop
         and obs.get_info()["date_obs"] >= start
     }
-    sources = sources[(sources["tstart"] < stop) & (sources["tstart"] >= start)]
+    sources = sources[(tstart < stop) & (tstart >= start)]
 
     large_exp_drift_sources = sources.copy()
     large_exp_drift_sources = large_exp_drift_sources[
