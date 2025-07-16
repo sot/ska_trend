@@ -100,7 +100,7 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
                 obsid, workdir=work_dir, archive_dir=archive_dir
             )
 
-            if obs.periscope_drift.is_selected():
+            if obs.is_selected:
                 obs.periscope_drift.get_sources()
                 obs.periscope_drift.get_sources(apply_filter=False)
                 obs.periscope_drift.get_periscope_drift_data()
