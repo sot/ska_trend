@@ -41,7 +41,7 @@
 		</ul>
 		<div class="tab-content pt-5" id="tab-content">
 			{% for time_range in time_ranges %}
-			<div class="tab-pane active" id="simple-tabpanel-{{ loop.index }}" role="tabpanel" aria-labelledby="tab-{{ loop.index }}">
+			<div class="tab-pane{% if loop.index == 1 %} active{% endif %}" id="simple-tabpanel-{{ loop.index }}" role="tabpanel" aria-labelledby="tab-{{ loop.index }}">
 				<table class="table">
 					<tbody>
 						<tr>
