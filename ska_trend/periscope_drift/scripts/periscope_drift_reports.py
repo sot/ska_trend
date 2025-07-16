@@ -116,11 +116,15 @@ def main():
         time_ranges = [
             {"start": stop - 30 * u.day, "stop": stop, "title": "30 days"},
             {"start": stop - 90 * u.day, "stop": stop, "title": "90 days"},
+            {"start": stop - 180 * u.day, "stop": stop, "title": "180 days"},
+            {"start": stop - 365 * u.day, "stop": stop, "title": "1 year"},
+            {"start": stop - 5 * 365 * u.day, "stop": stop, "title": "5 year"},
         ]
-        if (stop - start > 90 * u.day):
-            time_ranges.append({"start": stop - 365 * u.day, "stop": stop, "title": "1 year"})
-        if (stop - start > 365 * u.day):
-            time_ranges.append({"start": stop - 5 * 365 * u.day, "stop": stop, "title": "5 year"})
+        # exclude time ranges that do not add any data
+        time_ranges = [
+            time_ranges[idx] for idx in range(1, len(time_ranges))
+            if (time_ranges[idx - 1]["start"] > start)
+        ]
 
         reports.write_html_report(time_ranges, args.output, observations, sources)
 
