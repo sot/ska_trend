@@ -2,13 +2,13 @@
 Top-level functions to process periscope drift trending.
 """
 
+import logging
 import re
 import sys
 import traceback
 import warnings
 from multiprocessing import Pool
 
-import astromon.observation
 from astromon.utils import CiaoProcessFailure
 from astropy.table import Table
 from cxotime import CxoTime
@@ -107,15 +107,20 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
         except CiaoProcessFailure as exc:
             ok = False
             exc_type, exc_value, exc_traceback = sys.exc_info()
-            logger.error(f"OBSID={obs.obsid} CIAO process fail: {exc_value}")
+            msg = f"OBSID={obs.obsid} CIAO process fail: {exc_value}"
+            logger.error(msg)
             for line in exc.lines:
-                logger.error(f"OBSID={obs.obsid} CIAO process fail: {line}")
+                level = (
+                    logging.ERROR if "ERROR" in line
+                    else (logging.WARNING if "WARNING" in line else logging.DEBUG)
+                )
+                logger.log(level, f"OBSID={obs.obsid} CIAO process fail: {line}")
             trace = traceback.extract_tb(exc_traceback)
             for step in trace:
-                logger.error(
+                logger.debug(
                     f"OBSID={obsid}         in {step.filename}:{step.lineno}/{step.name}:"
                 )
-                logger.error(f"OBSID={obsid}           {step.line}")
+                logger.debug(f"OBSID={obsid}           {step.line}")
         except Exception as exc:
             ok = False
             msg = f"OBSID={obs.obsid} FAIL - skipped: {exc}"
