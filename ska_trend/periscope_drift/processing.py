@@ -291,6 +291,7 @@ def process_interval(
         except Exception as exc:
             errors[obs.obsid] = str(exc)
 
+    summary = Table(summary)
     msg = f"Processed {len(obsids)} observations with {len(summary)} sources"
     if len(errors) > 0:
         msg += f" and {len(errors)} errors"
@@ -298,4 +299,4 @@ def process_interval(
     for error in errors:
         logger.debug(f"    OBSID={error[0]}: {error[1]}")
 
-    return observations, Table(summary), errors
+    return observations, summary, errors
