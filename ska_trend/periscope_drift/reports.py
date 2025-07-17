@@ -128,6 +128,9 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
         "drift_figure": plots.get_drift_figure(sources).to_html(
             div_id=f"drift_figure_{idx}", **kwargs
         ),
+        "drift_history": plots.get_drift_history_figure(sources).to_html(
+            div_id=f"drift_history_{idx}", **kwargs
+        ),
         "tables": source_tables,
     }
     return result

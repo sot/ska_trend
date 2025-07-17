@@ -10,6 +10,7 @@ import plotly.io as pio
 import scipy
 import webcolors
 from astropy.table import Table
+from cxotime import CxoTime
 from plotly.subplots import make_subplots
 
 from ska_trend.periscope_drift import observation
@@ -1443,6 +1444,46 @@ def get_source_figure(src_pdd):
     )
     return fig
 
+
+def get_drift_history_scatter_object(sources):
+    custom_data = sources[["obsid", "id"]]
+    custom_data["date"] = [d[:10] for d in CxoTime(sources["tstart"]).iso]
+    scatter = go.Scatter(
+        {
+            "x": CxoTime(sources["tstart"]).datetime,
+            "y": sources["drift_actual"],
+            "mode": "markers",
+            "name": "drift_history",
+            "marker": {"color": "blue"},
+            "hoverinfo": "skip",
+            "customdata": custom_data,
+            "hovertemplate": (
+                "OBSID: %{customdata[0]}<br>"
+                "ID: %{customdata[1]}<extra></extra><br>"
+                "Date: %{customdata[2]}"
+            ),
+        }
+    )
+    return scatter
+
+def get_drift_history_figure(sources):
+    fig = go.Figure()
+
+    drift_history_scatter = get_drift_history_scatter_object(sources)
+
+    fig.add_trace(drift_history_scatter)
+
+    fig.update_layout({"showlegend": False,})
+
+    fig.update_yaxes(
+        {
+            "title": "Drift Residual (arcsec)",
+        },
+        # row=1,
+        # col=1,
+    )
+
+    return fig
 
 def get_drift_scatter_objects(sources):
     drift_scatter = go.Scatter(
