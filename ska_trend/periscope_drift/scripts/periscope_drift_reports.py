@@ -25,7 +25,7 @@ def get_parser():
         type=Path,
         help="Output directory",
     )
-    parser.add_argument("--start", default="-365d")
+    parser.add_argument("--start", default="-1825d")
     parser.add_argument("--stop", default=None)
     parser.add_argument(
         "--workdir",
