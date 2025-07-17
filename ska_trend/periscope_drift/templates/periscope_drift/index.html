@@ -55,6 +55,9 @@
 
 				<h3> Drift </h3>
 				<div class="ratio" style="--bs-aspect-ratio: 40%;">
+				{{time_range.drift_history}}
+				</div>
+				<div class="ratio" style="--bs-aspect-ratio: 40%;">
 				{{time_range.drift_figure}}
 				</div>
 
@@ -141,6 +144,35 @@
   <script>
 	// the figure ID is set in the to_html method of the plotly figure using `div_id=...`
 	var myPlot = document.getElementById('drift_figure_{{ loop.index - 1 }}');
+
+	myPlot.on('plotly_click', function(data) {
+		// this function requires:
+		//   - that the points array is not empty (clicked on a marker)
+		//   - that the first point's custom data is an array with at least two elements
+		// If any of these conditions are not met, the function fails silently.
+		// If they are met, the first two elements of customdata are interpreted as obsid and src_id
+		// and a URL path based on obsid and src_id is open in a new tab.
+		// This URL needs to agree with the file/directory structure
+		if (
+			!data.points
+			|| !data.points[0]
+			|| !data.points[0].customdata
+			|| data.points[0].customdata.length < 2
+		) {
+			// console.warn('No valid custom data found for the clicked point.');
+			return;
+		}
+		const obsid = data.points[0].customdata[0];
+		const src_id = data.points[0].customdata[1];
+		const path = {{ context.source_report_path }};
+		console.log(`opening path: ${path} for obsid: ${obsid}, src_id: ${src_id}`);
+		window.open(path, '_blank');
+	});
+  </script>
+
+<script>
+	// the figure ID is set in the to_html method of the plotly figure using `div_id=...`
+	var myPlot = document.getElementById('drift_history_{{ loop.index - 1 }}');
 
 	myPlot.on('plotly_click', function(data) {
 		// this function requires:
