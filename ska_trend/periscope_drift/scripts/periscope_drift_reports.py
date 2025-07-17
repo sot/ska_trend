@@ -122,8 +122,8 @@ def main():
         ]
         # exclude time ranges that do not add any data
         time_ranges = [
-            time_ranges[idx] for idx in range(1, len(time_ranges))
-            if (time_ranges[idx - 1]["start"] > start)
+            time_ranges[idx] for idx in range(len(time_ranges))
+            if idx == 0 or (time_ranges[idx - 1]["start"] > start)
         ]
 
         reports.write_html_report(time_ranges, args.output, observations, sources)
