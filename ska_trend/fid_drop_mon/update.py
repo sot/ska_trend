@@ -68,6 +68,9 @@ def get_vehicle_only_intervals(
     This only includes pure SCS-107 events and not other safing actions like NSM
     that call SCS-107 (since those events also stop the vehicle loads).
 
+    Intervals that overlap or are contained within with the supplied start and
+    stop times are returned.
+
     Prior to the start of SOSA (2011:335), both vehicle and observing loads
     were stopped by SCS-107, so this function returns no intervals prior
     to the start of SOSA.
@@ -75,18 +78,19 @@ def get_vehicle_only_intervals(
     Parameters
     ----------
     start : CxoTimeLike
-        Start time filter for intervals, where ``start`` must be before
-        (or equal to) the start time of the SCS-107 run. If ``None``, the
-        start time is set to the SOSA patch start time (2011:335).
+        Start time filter for intervals. If ``None``, the start time is set to
+        the SOSA patch start time (2011:335). Intervals that include or are after
+        with this start time are returned.
     stop : CxoTimeLike
-        Stop time filter for intervals, where ``stop`` must be after
-        the start time of the SCS-107 run. If ``None``, the stop time is set
-        to the current time.
+        Stop time filter for intervals. If ``None``, the stop time is set
+        to the current time. Intervals that include or are before
+        this stop time are returned.
 
     Returns
     -------
     Table
-        Table of vehicle-only SOSA intervals.
+        Table of vehicle-only SOSA intervals that overlap with the supplied
+        start and stop times.
 
     The returned table has the following columns:
         - datestart: Start time of the interval.
@@ -96,7 +100,9 @@ def get_vehicle_only_intervals(
     stop = CxoTime(stop) if stop is not None else CxoTime.now()
     start = sosa_patch if start is None else np.max([CxoTime(start), sosa_patch])
 
-    cmds = kc.get_cmds(start=start)
+    continuity_pad = 15 * u.day
+
+    cmds = kc.get_cmds(start=start - continuity_pad, stop=stop)
     # This filters on tlmsid and source first because that's fast.
     # Then those cmds are filtered by the SCS-107 event type.
     ok = (cmds["tlmsid"] == "OORMPDS") & (cmds["source"] == "CMD_EVT")
@@ -129,8 +135,11 @@ def get_vehicle_only_intervals(
 
     scs107_dates.extend(cmd_dates_scs107)
     scs107_dates = sorted(set(scs107_dates))
-    # Filter dates outside start/stop range
-    scs107_dates = [date for date in scs107_dates if start <= CxoTime(date) <= stop]
+    # Filter dates outside start/stop range (using a pad at the beginning to
+    # avoid missing an SCS-107 interval that has just started before the user-supplied
+    # start time)
+    scs107_dates = [date for date in scs107_dates
+                    if start - continuity_pad <= CxoTime(date) <= stop]
 
     scs107_intervals = []
     for scs107_date in scs107_dates:
@@ -143,7 +152,15 @@ def get_vehicle_only_intervals(
                 "datestop": datestop,
             }
         )
-    return Table(scs107_intervals)
+
+    # Convert to astropy table
+    scs107_intervals = Table(scs107_intervals)
+
+    # Filter to keep only those that overlap with the supplied start stop times
+    ok = (CxoTime(scs107_intervals["datestart"]) <= stop) & (
+        CxoTime(scs107_intervals["datestop"]) >= start
+    )
+    return scs107_intervals[ok]
 
 
 def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
