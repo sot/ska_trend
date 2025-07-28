@@ -138,8 +138,9 @@ def get_vehicle_only_intervals(
     # Filter dates outside start/stop range (using a pad at the beginning to
     # avoid missing an SCS-107 interval that has just started before the user-supplied
     # start time)
-    scs107_dates = [date for date in scs107_dates
-                    if start - continuity_pad <= CxoTime(date) <= stop]
+    scs107_dates = [
+        date for date in scs107_dates if start - continuity_pad <= CxoTime(date) <= stop
+    ]
 
     scs107_intervals = []
     for scs107_date in scs107_dates:
