@@ -98,7 +98,7 @@ def get_vehicle_only_intervals(
     """
     sosa_patch = CxoTime("2011:335")
     stop = CxoTime(stop) if stop is not None else CxoTime.now()
-    start = sosa_patch if start is None else np.max([CxoTime(start), sosa_patch])
+    start = sosa_patch if start is None else max(CxoTime(start), sosa_patch)
 
     # Normal return to science operations after an SCS-107 is within 2 days.  I've
     # included a 15 day pad because fetching commands is not very expensive.
