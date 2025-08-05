@@ -34,7 +34,7 @@ def get_parser():
     )
     parser.add_argument(
         "--archive-dir",
-        default=Path("/data/aca/periscope_drift/data"),
+        default=Path(os.environ["SKA"]) / "data" / "astromon" / "archive",
         type=Path,
         help="Archive directory",
     )

@@ -110,6 +110,7 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
     )
 
     kwargs = {
+        "responsive": True,
         "full_html": False,
         "include_plotlyjs": "cdn",
     }
