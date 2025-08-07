@@ -1,0 +1,184 @@
+<html>
+<head>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+	<!-- the following line is to support MathJax in older browsers -->
+	<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+	</script>
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css"
+				rel="stylesheet"
+				integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3"
+				crossorigin="anonymous">
+
+	<style>
+		h1 {
+			color: #990000;
+		}
+
+		h2 {
+			color: #990000;
+		}
+	</style>
+  <title>Periscope Trending Report</title>
+</head>
+
+<body>
+	<div class="container-md">
+		<!--#include virtual="/incl/header.html"-->
+	</div>
+
+  <div class="container-md">
+    <h2> OBSID {{ source.obsid }}, source {{ source.id }} </h2>
+
+    
+    
+    <div class="container">
+      <div class="row">
+        <div class="col">
+          <!-- <span class="align-baseline"> -->
+          <div class="d-flex align-items-center">
+            <table class="table">
+              <tr>
+                <th scope="row"> OBSID </th> <td>{{ source.obsid }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> ID </th> <td>{{ source.id }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> off-axis angle (arcmin) </th> <td>{{ '{:.2f}'.format(source.theta) }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> yag (arcsec) </th> <td>{{ '{:.2f}'.format(source.y_angle) }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> zag (arcsec) </th> <td>{{ '{:.2f}'.format(source.z_angle) }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> N </th> <td>{{ source.net_counts }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> SNR </th> <td>{{ '{:.1f}'.format(source.snr) }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> pileup </th> <td>{{ '{:.2f}'.format(source.max_pileup) }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> pileup size </th> <td>{{ source.pileup_size }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> duration </th> <td>{{ '{:.0f}'.format(source.obs_duration) }} </td>
+              </tr>
+            </table>
+          </div>
+          <!-- </span> -->
+        </div>
+        <div class="col">
+          <table class="table">
+            <tr>
+              <th scope="row">  </th>
+              <th scope="row">  </th>
+              <th> yag </th>
+              <th> zag </th>
+            </tr>
+            <tr>
+              <th scope="row" colspan="2"> slope </th>
+              <td> {{ "{:.1f}".format(metrics.yag_slope) }} &pm; {{ "{:.1f}".format(metrics.yag_slope_err) }}</td>
+              <td> {{ "{:.1f}".format(metrics.zag_slope) }} &pm; {{ "{:.1f}".format(metrics.zag_slope_err) }}</td>
+            </tr>
+            <tr>
+              <th scope="row" colspan="2"> chi2 (ndf) </th>
+              <td> {{ "{:.1f}".format(metrics.yag_null_chi2) }} (n={{ "{:.0f}".format(metrics.yag_ndf) }})</td>
+              <td> {{ "{:.1f}".format(metrics.zag_null_chi2) }} (n={{ "{:.0f}".format(metrics.zag_ndf) }})</td>
+            </tr>
+            <tr>
+              <th scope="row" colspan="2"> p-value </th>
+              <td> {{ "{:.2}".format(metrics.yag_null_p_value_corr) }} </td>
+              <td> {{ "{:.2}".format(metrics.zag_null_p_value_corr) }} </td>
+            </tr>
+            <tr>
+              <th scope="row" colspan="2"> expected drift </th>
+              <td> {{ "{:.1f}".format(metrics.drift_yag_expected) }}</td>
+              <td> {{ "{:.1f}".format(metrics.drift_zag_expected) }}</td>
+            </tr>
+            <tr>
+              <th scope="row" colspan="2"> drift residual </th>
+              <td> {{ "{:.1f}".format(metrics.drift_yag_residual) }}</td>
+              <td> {{ "{:.1f}".format(metrics.drift_zag_residual) }}</td>
+            </tr>
+          </table>
+        </div>
+        <div class="col">
+          <div>
+            {{source_figure}}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="accordion" id="accordionExample">
+      <div class="accordion-item">
+        <h2 class="accordion-header" id="headingOne">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne" aria-expanded="true" aria-controls="collapseOne">
+            OCAT Information
+          </button>
+        </h2>
+        <div id="collapseOne" class="accordion-collapse collapse" aria-labelledby="headingOne" data-bs-parent="#accordionExample">
+          <div class="accordion-body">
+            <h3> {{ ocat.abstract.proposal_title }}</h3>
+            <p> {{ ocat.abstract.abstract }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2> Time Evolution </h2>
+    <!-- <div class="ratio ratio-21x9"> -->
+      <div class="ratio" style="--bs-aspect-ratio: 50%;">
+        {{scatter_plot}}
+      </div>
+      
+    <h2> Telemetry </h2>
+    <div class="ratio" style="--bs-aspect-ratio: 40%;">
+      {{telemetry_figure}}
+    </div>
+
+    <h2> Principal Component </h2>
+    <div class="ratio" style="--bs-aspect-ratio: 40%;">
+      {{pc1_figure}}
+    </div>
+
+    <h2> Plots Vs Gradients </h2>
+    <div class="ratio" style="--bs-aspect-ratio: 40%;">
+      {{scatter_vs_gradients}}
+    </div>
+
+    <h2> Other Plots </h2>
+
+    <h4>
+      A comparison of the yag/zag distribution between the bins with the highes/lowest values.
+    </h4>
+    <div class="ratio" style="--bs-aspect-ratio: 40%;">
+      {{extreme_bin_histograms_figure}}
+    </div>
+
+    <h4> 3d-plot of Residuals Vs Telemetry </h4>
+    <div class="ratio" style="--bs-aspect-ratio: 40%;">
+      {{plot_3d_figures}}
+    </div>
+
+  </div>
+
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+    integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+    crossorigin="anonymous">
+  </script>
+
+</body>
+</html>
+
+
+      
