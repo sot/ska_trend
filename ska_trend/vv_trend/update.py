@@ -3,17 +3,16 @@
 import argparse
 import shutil
 from pathlib import Path
-import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-import matplotlib.cm as cm
-from astropy.table import Table
+
 import astropy.units as u
-
-from cxotime import CxoTime
-
+import matplotlib
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+from astropy.table import Table
 from chandra_aca.dark_model import get_warm_fracs
+from cxotime import CxoTime
+from matplotlib import cm
 from mica.vv import get_rms_data
 
 
