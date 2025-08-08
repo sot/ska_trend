@@ -24,7 +24,7 @@ def get_options():
     return parser
 
 
-def mission_plots(rms_data):
+def mission_plots(rms_data): # noqa: PLR0915 Too many statements
     norm = mpl.colors.LogNorm()
     my_cm = cm.jet
     figsize = (6, 4)
@@ -136,11 +136,11 @@ def mission_plots(rms_data):
     plt.ylabel("N stars")
     cbn.update_ticks()
 
-    return dict(
-        hist2d_fig=hist2d_fig,
-        hist2d_fig_n100=hist2d_fig_n100,
-        mag_vs_resid=mag_resid_fig,
-    )
+    return {
+        "hist2d_fig": hist2d_fig,
+        "hist2d_fig_n100": hist2d_fig_n100,
+        "mag_vs_resid": mag_resid_fig,
+    }
 
 
 def main(args=None):
