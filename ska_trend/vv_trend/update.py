@@ -152,7 +152,7 @@ def main(args=None):
 
     # Copy index to output directory
     shutil.copyfile(
-        Path(__file__).parent / "data" / "index_template.html", outdir / "index.html"
+        Path(__file__).parent / "index_template.html", outdir / "index.html"
     )
 
     rms_data = Table(get_rms_data())
