@@ -24,7 +24,7 @@ def get_options():
     return parser
 
 
-def mission_plots(rms_data): # noqa: PLR0915 Too many statements
+def mission_plots(rms_data):  # noqa: PLR0915 Too many statements
     norm = mpl.colors.LogNorm()
     my_cm = cm.jet
     figsize = (6, 4)
