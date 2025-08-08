@@ -8,6 +8,7 @@ entry_points = {
         "ska_trend_centroid_dashboard=ska_trend.centroid_dashboard.app:main",
         "ska_trend_fid_drop_mon_update=ska_trend.fid_drop_mon.update:main",
         "ska_trend_periscope_drift=ska_trend.periscope_drift.scripts.periscope_drift_reports:main",
+        "ska_trend_vv_trend_update_plots=ska_trend.vv_trend.update:main",
     ]
 }
 
@@ -33,6 +34,7 @@ setup(
         "ska_trend.fid_drop_mon",
         "ska_trend.periscope_drift",
         "ska_trend.periscope_drift.scripts",
+        "ska_trend.vv_trend",
     ],
     package_data={
         "ska_trend": [
@@ -43,6 +45,8 @@ setup(
             "centroid_dashboard/task_schedule.cfg",
             "fid_drop_mon/index_template.html",
             "fid_drop_mon/task_schedule.cfg",
+            "vv_trend/index_template.html",
+            "vv_trend/task_schedule.cfg",
         ],
         "ska_trend.periscope_drift": [
             "task_schedule.cfg",
