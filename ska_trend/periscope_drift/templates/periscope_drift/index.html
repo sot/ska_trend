@@ -1,0 +1,207 @@
+<html>
+<head>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+	<!-- the following line is to support MathJax in older browsers -->
+	<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+	</script>
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css"
+				rel="stylesheet"
+				integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3"
+				crossorigin="anonymous">
+
+	<style>
+		h1 {
+			color: #990000;
+		}
+
+		h2 {
+			color: #990000;
+		}
+	</style>
+  <title>Periscope Trending Report</title>
+</head>
+
+<body>
+	<div class="container-md">
+		<!--#include virtual="/incl/header.html"-->
+	</div>
+
+	<div class="container-md">
+		<h2> Periscope Trending Report </h2>
+
+		<ul class="nav nav-tabs" role="tablist">
+			{% for time_range in time_ranges %}
+			<li class="nav-item" role="presentation">
+			<a class="nav-link{% if loop.index == 1 %} active{% endif %}" id="tab-{{ loop.index }}" data-bs-toggle="tab" href="#simple-tabpanel-{{ loop.index }}" role="tab" aria-controls="simple-tabpanel-{{ loop.index }}" aria-selected={% if loop.index == 1 %}"true"{% else %}"false"{% endif %}>{{ time_range.title }}</a>
+			</li>
+			{% endfor %}
+		</ul>
+		<div class="tab-content pt-5" id="tab-content">
+			{% for time_range in time_ranges %}
+			<div class="tab-pane{% if loop.index == 1 %} active{% endif %}" id="simple-tabpanel-{{ loop.index }}" role="tabpanel" aria-labelledby="tab-{{ loop.index }}">
+				<table class="table">
+					<tbody>
+						<tr>
+							<th>Start</th> <td>{{ time_range.start }} ({{ time_range.start_iso }})</td>
+						</tr>
+						<tr>
+							<th>Stop</th> <td>{{ time_range.stop }} ({{ time_range.stop_iso }})</td>
+						</tr>
+					</tbody>
+				</table>
+
+				<h3> Drift </h3>
+				<div class="ratio" style="--bs-aspect-ratio: 40%;">
+				{{time_range.drift_history}}
+				</div>
+				<div class="ratio" style="--bs-aspect-ratio: 40%;">
+				{{time_range.drift_figure}}
+				</div>
+
+				<h3> Chi2 </h3>
+				<div class="ratio" style="--bs-aspect-ratio: 40%;">
+					{{time_range.chi2_figure}}
+				</div>
+
+				<h3> p-value </h3>
+				<div class="ratio" style="--bs-aspect-ratio: 40%;">
+					{{time_range.p_value_figure}}
+				</div>
+
+				<h3> Selected Sources </h3>
+
+				{% for table in time_range.tables %}
+				<div class="accordion" id="sourceTablesAccordion">
+				<div class="accordion-item">
+					<h2 class="accordion-header" id="heading_{{ table.id }}">
+					<button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse_{{ table.id }}" aria-expanded="true" aria-controls="collapse_{{ table.id }}">
+						{{ table.title }}
+					</button>
+					</h2>
+					<div id="collapse_{{ table.id }}" class="accordion-collapse collapse show" aria-labelledby="heading_{{ table.id }}" data-bs-parent="#sourceTablesAccordion">
+					<div class="accordion-body">
+						<table class="table">
+							<thead>
+								<tr>
+									<th>OBSID</th>
+									<th>src</th>
+									<th colspan="2">expected drift (arcsec)</th>
+									<th colspan="2">drift residual (arcsec)</th>
+									<th colspan="2">chi2</th>
+									<th colspan="2">p_value</th>
+								</tr>
+								<tr>
+									<th></th>
+									<th></th>
+									<th>yag</th>
+									<th>zag</th>
+									<th>yag</th>
+									<th>zag</th>
+									<th>yag</th>
+									<th>zag</th>
+									<th>yag</th>
+									<th>zag</th>
+								</tr>
+							</thead>
+							<tbody>
+								{% for row in table.sources %}
+								<tr>
+									<td><a href="{{row.filename}}">{{row.obsid}}</a></td>
+									<td>{{row.id}}</td>
+									<td>{{'{:.2f}'.format(row.drift_yag_expected)}}</td>
+									<td>{{'{:.2f}'.format(row.drift_zag_expected)}}</td>
+									<td>{{'{:.2f}'.format(row.drift_yag_residual)}}</td>
+									<td>{{'{:.2f}'.format(row.drift_zag_residual)}}</td>
+									<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_yag_null_chi2_corr)}}</td>
+									<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_zag_null_chi2_corr)}}</td>
+									<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_yag_null_p_value_corr)}}</td>
+									<td>{{'{:.2f}'.format(row.OOBAGRD_pc1_zag_null_p_value_corr)}}</td>
+								</tr>
+								{% endfor %}
+							</tbody>
+						</table>
+					</div>
+					</div>
+				</div>
+				</div>
+				{% endfor %}
+
+			</div>
+			{% endfor %}
+		</div>
+	</div>
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+    integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+    crossorigin="anonymous">
+  </script>
+
+  {% for time_range in time_ranges %}
+  <script>
+	// the figure ID is set in the to_html method of the plotly figure using `div_id=...`
+	var myPlot = document.getElementById('drift_figure_{{ loop.index - 1 }}');
+
+	myPlot.on('plotly_click', function(data) {
+		// this function requires:
+		//   - that the points array is not empty (clicked on a marker)
+		//   - that the first point's custom data is an array with at least two elements
+		// If any of these conditions are not met, the function fails silently.
+		// If they are met, the first two elements of customdata are interpreted as obsid and src_id
+		// and a URL path based on obsid and src_id is open in a new tab.
+		// This URL needs to agree with the file/directory structure
+		if (
+			!data.points
+			|| !data.points[0]
+			|| !data.points[0].customdata
+			|| data.points[0].customdata.length < 2
+		) {
+			// console.warn('No valid custom data found for the clicked point.');
+			return;
+		}
+		const obsid = data.points[0].customdata[0];
+		const src_id = data.points[0].customdata[1];
+		const path = {{ context.source_report_path }};
+		console.log(`opening path: ${path} for obsid: ${obsid}, src_id: ${src_id}`);
+		window.open(path, '_blank');
+	});
+  </script>
+
+<script>
+	// the figure ID is set in the to_html method of the plotly figure using `div_id=...`
+	var myPlot = document.getElementById('drift_history_{{ loop.index - 1 }}');
+
+	myPlot.on('plotly_click', function(data) {
+		// this function requires:
+		//   - that the points array is not empty (clicked on a marker)
+		//   - that the first point's custom data is an array with at least two elements
+		// If any of these conditions are not met, the function fails silently.
+		// If they are met, the first two elements of customdata are interpreted as obsid and src_id
+		// and a URL path based on obsid and src_id is open in a new tab.
+		// This URL needs to agree with the file/directory structure
+		if (
+			!data.points
+			|| !data.points[0]
+			|| !data.points[0].customdata
+			|| data.points[0].customdata.length < 2
+		) {
+			// console.warn('No valid custom data found for the clicked point.');
+			return;
+		}
+		const obsid = data.points[0].customdata[0];
+		const src_id = data.points[0].customdata[1];
+		const path = {{ context.source_report_path }};
+		console.log(`opening path: ${path} for obsid: ${obsid}, src_id: ${src_id}`);
+		window.open(path, '_blank');
+	});
+  </script>
+  {% endfor %}
+
+</body>
+</html>
+
+
+      
