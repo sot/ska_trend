@@ -38,9 +38,9 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
 
     tstart = [observations[f"{obs}"].get_info()["tstart"] for obs in sources["obsid"]]
     observations = {
-        key: obs for key, obs in observations.items()
-        if obs.get_info()["date_obs"] < stop
-        and obs.get_info()["date_obs"] >= start
+        key: obs
+        for key, obs in observations.items()
+        if obs.get_info()["date_obs"] < stop and obs.get_info()["date_obs"] >= start
     }
     sources = sources[(tstart < stop) & (tstart >= start)]
 

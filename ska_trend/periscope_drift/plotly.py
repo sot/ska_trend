@@ -707,7 +707,6 @@ def scatter_plots(matches):
 
 
 def plot(obs, periscope_drift_data, src_id):
-
     from ska_trend.periscope_drift.reports import expected_corr  # noqa: PLC0415
 
     cols = [
@@ -1466,6 +1465,7 @@ def get_drift_history_scatter_object(sources):
     )
     return scatter
 
+
 def get_drift_history_figure(sources):
     fig = go.Figure()
 
@@ -1473,7 +1473,11 @@ def get_drift_history_figure(sources):
 
     fig.add_trace(drift_history_scatter)
 
-    fig.update_layout({"showlegend": False,})
+    fig.update_layout(
+        {
+            "showlegend": False,
+        }
+    )
 
     fig.update_yaxes(
         {
@@ -1484,6 +1488,7 @@ def get_drift_history_figure(sources):
     )
 
     return fig
+
 
 def get_drift_scatter_objects(sources):
     drift_scatter = go.Scatter(
@@ -1598,7 +1603,8 @@ def get_drift_figure(sources):
 
     if len(sources) > 1:
         ax_max = max(
-            1.1 * max(sources["drift_expected"].max(), sources["drift_actual"].max()), 1.5
+            1.1 * max(sources["drift_expected"].max(), sources["drift_actual"].max()),
+            1.5,
         )
     else:
         ax_max = 3.0

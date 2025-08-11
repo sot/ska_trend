@@ -111,7 +111,8 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
             logger.error(msg)
             for line in exc.lines:
                 level = (
-                    logging.ERROR if "ERROR" in line
+                    logging.ERROR
+                    if "ERROR" in line
                     else (logging.WARNING if "WARNING" in line else logging.DEBUG)
                 )
                 logger.log(level, f"OBSID={obs.obsid} CIAO process fail: {line}")
