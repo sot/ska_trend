@@ -125,7 +125,7 @@ class PeriscopeDriftData:
             # distance to closest source. Extended sources can be split into several sources
             & (source["near_neighbor_dist"] > 6)
             # psfratio is the ratio of the source ellipse to the PSF size
-            & (source["psfratio"] < 0.6)
+            & (source["psfratio"] < 2.0)
         )
 
     def get_events(self):
