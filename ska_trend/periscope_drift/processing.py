@@ -297,7 +297,7 @@ def process_interval(
     if len(errors) > 0:
         msg += f" and {len(errors)} errors"
     logger.debug(msg)
-    for error in errors:
-        logger.debug(f"    OBSID={error[0]}: {error[1]}")
+    for obsid, error in errors.items():
+        logger.debug(f"    OBSID={obsid}: {error}")
 
     return observations, summary, errors
