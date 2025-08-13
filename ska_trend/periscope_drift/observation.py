@@ -111,16 +111,8 @@ class PeriscopeDriftData:
         )
 
     def is_selected_source(self, source):
-        max_ang_corr = np.sqrt(
-            source["max_yang_corr"] ** 2 + source["max_zang_corr"] ** 2
-        )
         return (
-            (
-                (source["d_OOBAGRD3"] > 0.05)
-                | (source["d_OOBAGRD6"] > 0.005)
-                | (max_ang_corr > 0.1)
-            )
-            & (source["snr"] > 10)
+            (source["snr"] > 10)
             & (source["net_counts"] > 1000)
             # distance to closest source. Extended sources can be split into several sources
             & (source["near_neighbor_dist"] > 6)
