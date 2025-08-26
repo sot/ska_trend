@@ -175,32 +175,18 @@ def plot_pc1(periscope_drift_data):
     plt.xlabel("OOBAGRD3")
     plt.title("Trajectory in gradient space")
 
-    plt.sca(axes["yag_pc1"])
-    plt.errorbar(
-        bd["OOBAGRD_pc1_mean"], bd["yag"], yerr=bd["d_yag"], fmt="o", label="yag"
-    )
-    fit = fits[
-        (fits["bin_col"] == "rel_time")
-        & (fits["x_col"] == "OOBAGRD_pc1")
-        & (fits["target_col"] == "yag")
-    ][0]
-    fit["parameters"]
-    plt.plot(x, observation.line(x, *fit["parameters"]), color="tab:orange")
-    # plt.legend(loc="best")
-    plt.xlabel("OOBAGRD PC1")
-    plt.title("YAG")
-
-    plt.sca(axes["zag_pc1"])
-    plt.errorbar(
-        bd["OOBAGRD_pc1_mean"], bd["zag"], yerr=bd["d_zag"], fmt="o", label="zag"
-    )
-    fit = fits[
-        (fits["bin_col"] == "rel_time")
-        & (fits["x_col"] == "OOBAGRD_pc1")
-        & (fits["target_col"] == "zag")
-    ][0]
-    fit["parameters"]
-    plt.plot(x, observation.line(x, *fit["parameters"]), color="tab:orange")
+    for col in ["yag", "zag"]:
+        plt.sca(axes[f"{col}_pc1"])
+        plt.errorbar(
+            bd["OOBAGRD_pc1_mean"], bd[col], yerr=bd[f"d_{col}"], fmt="o", label=col
+        )
+        if "x_col" in fits.colnames:
+            fit = fits[
+                (fits["bin_col"] == "rel_time")
+                & (fits["x_col"] == "OOBAGRD_pc1")
+                & (fits["target_col"] == col)
+            ][0]
+            plt.plot(x, observation.line(x, *fit["parameters"]), color="tab:orange")
 
     axes["zag_pc1"].sharex(axes["yag_pc1"])
     axes["zag_pc1"].sharey(axes["yag_pc1"])
@@ -208,10 +194,15 @@ def plot_pc1(periscope_drift_data):
     ymax = np.max([[bd["yag"] + bd["d_yag"]], [bd["zag"] + bd["d_zag"]]])
     ymin = np.min([[bd["yag"] - bd["d_yag"]], [bd["zag"] - bd["d_zag"]]])
     y_margin = 0.1 * (ymax - ymin)
-    plt.ylim((ymin - y_margin, ymax + y_margin))
 
-    plt.title("ZAG")
+    plt.sca(axes["yag_pc1"])
     plt.xlabel("OOBAGRD PC1")
+    plt.title("YAG")
+
+    plt.sca(axes["zag_pc1"])
+    plt.xlabel("OOBAGRD PC1")
+    plt.title("ZAG")
+    plt.ylim((ymin - y_margin, ymax + y_margin))
     plt.ylabel("Residuals (arcsec)")
 
     plt.suptitle("Fit over First Principal Component in Gradient Space")
@@ -847,10 +838,12 @@ def get_fit_1d_line(periscope_drift_data, col, y_col, bin_col="rel_time", color=
         & (np.isfinite(periscope_drift_data.binned_data_1d[y_col]))
     ]
 
-    fits_1d = periscope_drift_data.fits_1d[
-        (periscope_drift_data.fits_1d["x_col"] == col)
-        & (periscope_drift_data.fits_1d["target_col"] == y_col)
-    ]
+    fits_1d = []
+    if "x_col" in periscope_drift_data.fits_1d.colnames:
+        fits_1d = periscope_drift_data.fits_1d[
+            (periscope_drift_data.fits_1d["x_col"] == col)
+            & (periscope_drift_data.fits_1d["target_col"] == y_col)
+        ]
 
     line_fit = dict(fits_1d[0]) if len(fits_1d) > 0 else None
 
@@ -1066,16 +1059,18 @@ def get_scatter_plot_figure(src_pdd):
         showlegend=False,
     )
 
-    ymax = np.max(scatter_yag.y + scatter_yag.error_y["array"])
-    ymin = np.min(scatter_yag.y - scatter_yag.error_y["array"])
-    margin = (ymax - ymin) * 0.05
-    dy = np.max([np.abs(ymax + margin), np.abs(ymin - margin), 0.6])
-    fig.update_yaxes(range=[-dy / 2, dy / 2], row=2, col=1)
+    if len(scatter_yag.y) > 0:
+        ymax = np.max(scatter_yag.y + scatter_yag.error_y["array"])
+        ymin = np.min(scatter_yag.y - scatter_yag.error_y["array"])
+        margin = (ymax - ymin) * 0.05
+        dy = np.max([np.abs(ymax + margin), np.abs(ymin - margin), 0.6])
+        fig.update_yaxes(range=[-dy / 2, dy / 2], row=2, col=1)
 
-    xmin = np.min(evt_scatter_yag.x)
-    xmax = np.max(evt_scatter_yag.x)
-    margin = (xmax - xmin) * 0.05
-    fig.update_xaxes(range=[xmin - margin, xmax + margin], row=2, col=1)
+    if len(evt_scatter_yag.x) > 0:
+        xmin = np.min(evt_scatter_yag.x)
+        xmax = np.max(evt_scatter_yag.x)
+        margin = (xmax - xmin) * 0.05
+        fig.update_xaxes(range=[xmin - margin, xmax + margin], row=2, col=1)
 
     fig.update_yaxes(title_text="yag", row=1, col=1)
     fig.update_yaxes(title_text="zag", row=2, col=1)
@@ -1152,6 +1147,8 @@ def get_scatter_versus_gradients_figure(src_pdd):
 
     for row, y_col in enumerate(["yag", "zag"], start=1):
         key = ("OOBAGRD3", y_col)
+        if len(scatter[key].y) == 0:
+            continue
         ymax = np.max(scatter[key].y + scatter[key].error_y["array"])
         ymin = np.min(scatter[key].y - scatter[key].error_y["array"])
         margin = (ymax - ymin) * 0.05

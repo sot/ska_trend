@@ -584,9 +584,12 @@ def get_smoothing_spline(binned_data, y_col):
         tmax = dat["rel_time_mean"][-1]
         return BSpline(
             [tmin - 1, tmin, tmax, tmax + 1],
-            [regress.intercept + regress.slope * tmin, regress.intercept + regress.slope * tmax],
+            [
+                regress.intercept + regress.slope * tmin,
+                regress.intercept + regress.slope * tmax,
+            ],
             k=1,
-            extrapolate=True
+            extrapolate=True,
         )
     # the value of lambda might seem arbitrary, but it can be estimated from cross-validation
     # this number is just close enough
@@ -603,8 +606,9 @@ def _summarize_col_(binned_data_1d, fits_1d, col, y_col, bin_col="rel_time"):
     sel = (binned_data_1d["bin_col"] == bin_col) & np.isfinite(binned_data_1d[y_col])
     binned_data = binned_data_1d[sel]
 
-    sel = (fits_1d["x_col"] == col) & (fits_1d["target_col"] == y_col)
-    if np.any(sel):
+    if "x_col" in fits_1d.colnames and np.any(
+        sel := (fits_1d["x_col"] == col) & (fits_1d["target_col"] == y_col)
+    ):
         line_fit = dict(fits_1d[sel][0])
     else:
         line_fit = None
