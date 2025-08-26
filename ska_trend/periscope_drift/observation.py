@@ -28,7 +28,7 @@ from chandra_aca.transform import radec_to_yagzag
 from cheta import fetch
 from cxotime import CxoTime
 from Quaternion import Quat
-from scipy.interpolate import make_smoothing_spline
+from scipy.interpolate import BSpline, make_smoothing_spline
 
 from ska_trend.periscope_drift.correction import get_expected_correction
 
@@ -570,6 +570,24 @@ def get_smoothing_spline(binned_data, y_col):
     dat = binned_data[
         (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data[y_col]))
     ]
+    if len(dat) == 0:
+        return BSpline([0, 1], [np.nan], k=0, extrapolate=True)
+    elif len(dat) == 1:
+        # this should never happen, but I do not want to deal with this error ever.
+        # returning a constant spline
+        return BSpline([0, 1], dat[y_col], k=0, extrapolate=True)
+    elif len(dat) < 5:
+        # the smoothing spline call fails with too few points
+        # will return a first degree spline that evaluates to a linear regression
+        regress = scipy.stats.linregress(dat["rel_time_mean"], dat[y_col])
+        tmin = dat["rel_time_mean"][0]
+        tmax = dat["rel_time_mean"][-1]
+        return BSpline(
+            [tmin - 1, tmin, tmax, tmax + 1],
+            [regress.intercept + regress.slope * tmin, regress.intercept + regress.slope * tmax],
+            k=1,
+            extrapolate=True
+        )
     # the value of lambda might seem arbitrary, but it can be estimated from cross-validation
     # this number is just close enough
     return make_smoothing_spline(dat["rel_time_mean"], dat[y_col], lam=3e9)
