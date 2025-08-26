@@ -606,8 +606,10 @@ def _summarize_col_(binned_data_1d, fits_1d, col, y_col, bin_col="rel_time"):
     sel = (binned_data_1d["bin_col"] == bin_col) & np.isfinite(binned_data_1d[y_col])
     binned_data = binned_data_1d[sel]
 
-    sel = (fits_1d["x_col"] == col) & (fits_1d["target_col"] == y_col)
-    if np.any(sel):
+    if (
+        "x_col" in fits_1d.colnames
+        and np.any(sel := (fits_1d["x_col"] == col) & (fits_1d["target_col"] == y_col))
+    ):
         line_fit = dict(fits_1d[sel][0])
     else:
         line_fit = None
