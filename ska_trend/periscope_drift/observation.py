@@ -28,7 +28,7 @@ from chandra_aca.transform import radec_to_yagzag
 from cheta import fetch
 from cxotime import CxoTime
 from Quaternion import Quat
-from scipy.interpolate import make_smoothing_spline
+from scipy.interpolate import BSpline, make_smoothing_spline
 
 from ska_trend.periscope_drift.correction import get_expected_correction
 
@@ -111,21 +111,13 @@ class PeriscopeDriftData:
         )
 
     def is_selected_source(self, source):
-        max_ang_corr = np.sqrt(
-            source["max_yang_corr"] ** 2 + source["max_zang_corr"] ** 2
-        )
         return (
-            (
-                (source["d_OOBAGRD3"] > 0.05)
-                | (source["d_OOBAGRD6"] > 0.005)
-                | (max_ang_corr > 0.1)
-            )
-            & (source["snr"] > 10)
-            & (source["net_counts"] > 1000)
+            (source["snr"] > 3)
+            & (source["net_counts"] > 200)
             # distance to closest source. Extended sources can be split into several sources
-            & (source["near_neighbor_dist"] > 6)
+            # & (source["near_neighbor_dist"] > 6)
             # psfratio is the ratio of the source ellipse to the PSF size
-            & (source["psfratio"] < 0.6)
+            & (source["psfratio"] < 3.0)
         )
 
     def get_events(self):
@@ -581,6 +573,27 @@ def get_smoothing_spline(binned_data, y_col):
     dat = binned_data[
         (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data[y_col]))
     ]
+    if len(dat) == 0:
+        return BSpline([0, 1], [np.nan], k=0, extrapolate=True)
+    elif len(dat) == 1:
+        # this should never happen, but I do not want to deal with this error ever.
+        # returning a constant spline
+        return BSpline([0, 1], dat[y_col], k=0, extrapolate=True)
+    elif len(dat) < 5:
+        # the smoothing spline call fails with too few points
+        # will return a first degree spline that evaluates to a linear regression
+        regress = scipy.stats.linregress(dat["rel_time_mean"], dat[y_col])
+        tmin = dat["rel_time_mean"][0]
+        tmax = dat["rel_time_mean"][-1]
+        return BSpline(
+            [tmin - 1, tmin, tmax, tmax + 1],
+            [
+                regress.intercept + regress.slope * tmin,
+                regress.intercept + regress.slope * tmax,
+            ],
+            k=1,
+            extrapolate=True,
+        )
     # the value of lambda might seem arbitrary, but it can be estimated from cross-validation
     # this number is just close enough
     return make_smoothing_spline(dat["rel_time_mean"], dat[y_col], lam=3e9)
@@ -596,8 +609,9 @@ def _summarize_col_(binned_data_1d, fits_1d, col, y_col, bin_col="rel_time"):
     sel = (binned_data_1d["bin_col"] == bin_col) & np.isfinite(binned_data_1d[y_col])
     binned_data = binned_data_1d[sel]
 
-    sel = (fits_1d["x_col"] == col) & (fits_1d["target_col"] == y_col)
-    if np.any(sel):
+    if "x_col" in fits_1d.colnames and np.any(
+        sel := (fits_1d["x_col"] == col) & (fits_1d["target_col"] == y_col)
+    ):
         line_fit = dict(fits_1d[sel][0])
     else:
         line_fit = None
