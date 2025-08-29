@@ -274,6 +274,8 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
         plot_3d_figures=plots.get_plot_3d_figures(src_pdd).to_html(**kwargs),
         ocat=ocat,
     )
-    filename.parent.mkdir(exist_ok=True, parents=True)
+    # if filename.parent exists and is a symlink, the mkdir call raises an exception
+    if not filename.parent.exists():
+        filename.parent.mkdir(exist_ok=True, parents=True)
     with open(filename, "w") as fh:
         fh.write(page)
