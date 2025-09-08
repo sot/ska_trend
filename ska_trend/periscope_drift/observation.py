@@ -89,10 +89,6 @@ class PeriscopeDriftData:
         """
         return self.obs.cache_dir
 
-    @stored_result("table", fmt="table", subdir="cache")
-    def get_table(self):
-        return table.Table({"a": np.arange(10), "b": np.arange(10) + 1})
-
     def is_selected(self):
         obsid_info = self.obs.get_info()
         return (
