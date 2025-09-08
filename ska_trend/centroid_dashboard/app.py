@@ -726,7 +726,7 @@ def write_index_html(obs: Observation, save_path: Path, traceback=None):
 
 
 def make_relative_symlink(target_path: Path, link_path: Path) -> None:
-    """Create a symbolic link pointing to target_path named link_path.
+    """Create a symbolic link named ``link_path`` pointing to ``target_path``.
 
     This uses a relative path for the target_path to allow moving directories.
 
