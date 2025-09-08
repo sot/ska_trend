@@ -7,6 +7,9 @@ from pathlib import Path
 
 import jinja2
 import numpy as np
+from astromon.db import is_in_excluded_region
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 from mica.archive.cda import get_ocat_web, get_proposal_abstract
 
 from ska_trend.periscope_drift import plotly as plots
@@ -160,6 +163,13 @@ def write_html_report(time_ranges, outdir, observations, sources, overwrite=Fals
         "`sources/${String(Math.floor(Number(obsid) / 1e3)).padStart(2, '0')}"
         "/${obsid}/${src_id}/index.html`"
     )
+
+    # astromon excluded regions can change at any time, and cache data might not reflect that,
+    # so we determine whether sources are excluded when writing the report
+    excluded = is_in_excluded_region(
+        SkyCoord(sources["ra"] * u.deg, sources["dec"] * u.deg), sources["obsid"]
+    )
+    sources = sources[~excluded]
 
     context = {"source_report_path": source_report_path}
 

@@ -17,6 +17,7 @@ import numpy as np
 import scipy
 import scipy.interpolate
 import ska_numpy
+from astromon.db import is_in_excluded_region
 from astromon.stored_result import stored_result
 from astromon.task import ReturnCode, run_tasks
 from astropy import table
@@ -106,8 +107,10 @@ class PeriscopeDriftData:
             )
         )
 
-    def is_selected_source(self, source):
-        return (
+    def is_selected_source(self, source, exclude_regions=True):
+        # sources are also excluded based on astromon's excluded regions, but we do not consider
+        # that here by default. The reason is that the excluded regions can be modified at any time.
+        result = (
             (source["snr"] > 3)
             & (source["net_counts"] > 200)
             # distance to closest source. Extended sources can be split into several sources
@@ -115,7 +118,14 @@ class PeriscopeDriftData:
             & (source["near_neighbor_dist"] > 6)
             # psfratio is the ratio of the source ellipse to the PSF size
             & (source["psfratio"] < 3.0)
+            # & ~excluded
         )
+        if exclude_regions:
+            excluded = is_in_excluded_region(
+                SkyCoord(source["ra"] * u.deg, source["dec"] * u.deg), source["obsid"]
+            )
+            result &= ~excluded
+        return result
 
     def get_events(self):
         # THIS IS A HACK: the "dependencies" decorator does not work on PeriscopeDriftData
@@ -278,7 +288,8 @@ class PeriscopeDriftData:
             src[col].format = fmt
 
         if apply_filter:
-            src = src[self.is_selected_source(src)]
+            # this will be cached, so do not use excluded regions (they can change at any time)
+            src = src[self.is_selected_source(src, exclude_regions=False)]
 
         return src
 

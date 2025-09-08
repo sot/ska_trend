@@ -8,11 +8,14 @@ import re
 import sys
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import ska_helpers
+from astropy.table import Table, vstack
 from cxotime import CxoTime
 from cxotime import units as u
 
-from ska_trend.periscope_drift import processing, reports
+from ska_trend.periscope_drift import observation, processing, reports
 
 logger = logging.getLogger("periscope_drift")
 
@@ -25,18 +28,21 @@ def get_parser():
         type=Path,
         help="Output directory",
     )
-    parser.add_argument("--start", default="-1825d")
+    parser.add_argument("--start", default="-60d", help="Start of processing interval")
     parser.add_argument("--stop", default=None)
+    parser.add_argument(
+        "--start-report", default="-1825d", help="Start of report interval"
+    )
     parser.add_argument(
         "--workdir",
         type=Path,
-        help="Working directory",
+        help="Working directory (the default is a temporary directory)",
     )
     parser.add_argument(
         "--archive-dir",
         default=Path(os.environ["SKA"]) / "data" / "astromon" / "archive",
         type=Path,
-        help="Archive directory",
+        help="Astromon archive directory",
     )
     parser.add_argument(
         "--log-level",
@@ -94,13 +100,18 @@ def main():
 
     stop = now if args.stop is None else CxoTime(args.stop)
 
-    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start, re.VERBOSE):
-        start = stop + float(args.start[:-1]) * u.d
+    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start_report, re.VERBOSE):
+        start_report = stop + float(args.start_report[:-1]) * u.d
     else:
-        start = CxoTime(args.start)
+        start_report = CxoTime(args.start_report)
 
-    observations, sources, errors = processing.process_interval(
-        start,
+    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start, re.VERBOSE):
+        start_process = stop + float(args.start[:-1]) * u.d
+    else:
+        start_process = CxoTime(args.start)
+
+    errors = processing.process_interval(
+        start_process,
         stop,
         archive_dir=args.archive_dir,
         workdir=args.workdir,
@@ -113,6 +124,7 @@ def main():
             json.dump(errors, fh)
 
     if not args.no_output:
+
         time_ranges = [
             {"start": stop - 30 * u.day, "stop": stop, "title": "30 days"},
             {"start": stop - 90 * u.day, "stop": stop, "title": "90 days"},
@@ -124,14 +136,31 @@ def main():
         time_ranges = [
             time_ranges[idx]
             for idx in range(len(time_ranges))
-            if idx == 0 or (time_ranges[idx - 1]["start"] > start)
+            if idx == 0 or (time_ranges[idx - 1]["start"] > start_report)
         ]
 
-        reports.write_html_report(time_ranges, args.output, observations, sources)
+        all_sources = processing.get_sources()
+
+        report_sources = all_sources[
+            np.in1d(all_sources["obsid"], processing.get_obsids(start_report, stop))
+        ]
+
+        report_observations = {
+            str(obsid): observation.Observation(
+                obsid, workdir=args.workdir, archive_dir=args.archive_dir
+            )
+            for obsid in np.unique(report_sources["obsid"])
+        }
+
+        reports.write_html_report(
+            time_ranges, args.output, report_observations, report_sources
+        )
+
+        with open(args.output / "errors.json", "w") as fh:
+            json.dump(errors, fh)
 
         with open(args.output / "sources.json", "w") as fh:
-            json.dump(sources.to_pandas().to_json(), fh)
-
+            fh.write(all_sources.to_pandas().to_json())
 
 if __name__ == "__main__":
     main()

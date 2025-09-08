@@ -3,14 +3,18 @@ Top-level functions to process periscope drift trending.
 """
 
 import logging
+import os
 import re
 import sys
 import traceback
 import warnings
 from multiprocessing import Pool
+from pathlib import Path
 
+import numpy as np
+import pandas as pd
 from astromon.utils import CiaoProcessFailure
-from astropy.table import Table
+from astropy.table import Table, vstack
 from cxotime import CxoTime
 from ska_arc5gl import Arc5gl
 from ska_helpers.logging import basic_logger
@@ -23,7 +27,13 @@ __all__ = [
     "process_observation",
     "run_multiprocess",
     "process_interval",
+    "SOURCES_FILE",
+    "get_sources",
+    "update_sources",
 ]
+
+
+SOURCES_FILE = Path(os.environ["SKA"]) / "data" / "periscope_drift_reports" / "sources.fits"
 
 
 def get_obsids(tstart, tstop):
@@ -216,6 +226,7 @@ def process_interval(
     n_threads=8,
     show_progress=True,
     workdir=None,
+    no_output=False,
 ):
     """
     Process all observations in the given time interval.
@@ -237,15 +248,11 @@ def process_interval(
     workdir : str
         Working directory. If this is None, a temporary directory will be created.
         If it is not None, a subdirectory will be created to store temporary files.
+    no_output : bool
+        If True, do not write output.
 
     Returns
     -------
-    observations : dict
-        Dictionary of observations, where the keys are the obsids and the values are
-        the corresponding Observation objects.
-    sources : Table
-        Table of sources, where each row corresponds to a source and the columns
-        contain the source data.
     errors : list
         List of tuples with the errors encountered during processing. Each tuple
         contains the obsid and the error message.
@@ -300,4 +307,42 @@ def process_interval(
     for obsid, error in errors.items():
         logger.debug(f"    OBSID={obsid}: {error}")
 
-    return observations, summary, errors
+    if not no_output:
+        update_sources(Table(summary), start, stop)
+
+    return errors
+
+
+def get_sources(filename=None):
+    """
+    Get sources on file.
+    """
+    filename = SOURCES_FILE if filename is None else filename
+    if not filename.exists():
+        raise FileNotFoundError(f"Sources file {filename} not found")
+    return Table.read(filename)
+
+
+def update_sources(sources, start, stop, filename=None):
+    """
+    Add the given sources to the sources file, removing any existing sources between start and stop.
+    """
+    filename = SOURCES_FILE if filename is None else filename
+    # if the file exists, replace the entries in the (start, stop) range
+    # with the newly processed ones
+
+    start = CxoTime(start)
+    stop = CxoTime(stop)
+
+    if filename.exists():
+        prev_sources = get_sources(filename)
+        sel = ~np.in1d(
+            prev_sources["obsid"], get_obsids(start, stop)
+        )
+        all_sources = vstack(
+            [prev_sources[sel], sources], metadata_conflicts="silent"
+        )
+    else:
+        all_sources = sources
+
+    all_sources.write(filename, overwrite=True)
