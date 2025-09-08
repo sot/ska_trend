@@ -156,9 +156,14 @@ class Paths:
     def __set__(self, obj, value): ...
 
     @property
+    def data_root(self) -> Path:
+        obj = self._obj
+        return Path(obj.opt["data_root"])
+
+    @property
     def report_dir(self) -> Path:
         obj = self._obj
-        return Path(obj.opt["data_root"]) / obj.path.report_subdir
+        return self.data_root / obj.path.report_subdir
 
     @property
     def report_subdir(self) -> Path:
@@ -698,6 +703,12 @@ def write_index_html(obs: Observation, save_path: Path, traceback=None):
     raise_sporadic_exc_for_testing()
 
     logger.debug(f"Making HTML for observation {obs.obsid}")
+
+    # Make a top-level symbolic link from {data_root}/last to obs.path.report_dir.
+    # This gets updated each time an observation is processed, including potential
+    # exceptions or reprocessing (but not skipped/fully-processed observations).
+    make_relative_symlink(obs.path.report_dir, obs.path.data_root / "last")
+
     # Get the template from index_template.html
     env = Environment(trim_blocks=True, lstrip_blocks=True)
     template = env.from_string(get_index_template())
@@ -711,6 +722,26 @@ def write_index_html(obs: Observation, save_path: Path, traceback=None):
     save_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Writing {save_path}")
     save_path.write_text(html)
+
+
+def make_relative_symlink(target_path: Path, link_path: Path) -> None:
+    """Create a symbolic link pointing to target_path named link_path.
+
+    This uses a relative path for the target_path to allow moving directories.
+
+    Parameters
+    ----------
+    target_path : Path
+        The source path the symbolic link points to.
+    link_path : Path
+        The destination path for the symbolic link.
+    """
+    if link_path.exists(follow_symlinks=False):
+        logger.debug(f"Removing existing file {link_path}")
+        link_path.unlink()
+    target_path_rel = os.path.relpath(target_path, start=link_path.parent)
+    logger.info(f"Linking {target_path_rel} to {link_path}")
+    link_path.symlink_to(target_path_rel)
 
 
 def get_centroid_resids_from_file(
@@ -1281,11 +1312,7 @@ def make_obsid_dir_links(obs: Observation):
 
     for target_path in in_dir.glob("*"):
         link_path = out_dir / target_path.name
-        if link_path.exists(follow_symlinks=False):
-            logger.info(f"Removing existing file {link_path}")
-            link_path.unlink()
-        logger.info(f"Linking {target_path} to {link_path}")
-        link_path.symlink_to(os.path.relpath(target_path, start=link_path.parent))
+        make_relative_symlink(target_path, link_path)
 
 
 def main(args=None):
