@@ -89,6 +89,12 @@ def get_opt():
         action="store_true",
     )
     parser.add_argument(
+        "--no-last-links",
+        help="Do not create symbolic links to the last observation "
+        "(use for reprocessing a past interval that does not come up to the present)",
+        action="store_true",
+    )
+    parser.add_argument(
         "--log-level", default="INFO", help="Logging level (default=INFO)"
     )
     return parser
@@ -704,11 +710,6 @@ def write_index_html(obs: Observation, save_path: Path, traceback=None):
 
     logger.debug(f"Making HTML for observation {obs.obsid}")
 
-    # Make a top-level symbolic link from {data_root}/last to obs.path.report_dir.
-    # This gets updated each time an observation is processed, including potential
-    # exceptions or reprocessing (but not skipped/fully-processed observations).
-    make_relative_symlink(obs.path.report_dir, obs.path.data_root / "last")
-
     # Get the template from index_template.html
     env = Environment(trim_blocks=True, lstrip_blocks=True)
     template = env.from_string(get_index_template())
@@ -1252,6 +1253,14 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     """Process the observation."""
     report_dir = obs.path.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
+
+    # Make top-level symbolic links to the last observation. This is done for every
+    # observation to ensure that the links are always up to date, even if reprocessing
+    # old observations with no links. Use --no-last-link to skip this step in the case
+    # of reprocessing a chunk in the middle in the past.
+    if not opt.no_last_links:
+        make_relative_symlink(obs.path.report_dir, obs.path.data_root / "last")
+        make_relative_symlink(obs.path.report_dir, obs.path.report_dir.parent / "last")
 
     # Allow for selective reprocessing by removing files
     for remove in opt.removes:
