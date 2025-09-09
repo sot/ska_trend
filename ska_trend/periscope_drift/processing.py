@@ -223,9 +223,9 @@ def process_interval(
     Parameters
     ----------
     start : str
-        Start of the time interval. Can be a CxoTime-like string or a relative time string.
+        Start of the time interval. Can be a CxoTime-like string.
     stop : str
-        End of the time interval. Can be a CxoTime-like string or a relative time string.
+        End of the time interval. Can be a CxoTime-like string.
     log_level : str
         Logging level. One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
     archive_dir : str
