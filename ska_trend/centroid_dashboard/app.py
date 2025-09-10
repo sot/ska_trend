@@ -90,7 +90,7 @@ def get_opt():
     )
     parser.add_argument(
         "--no-last-links",
-        help="Do not create symbolic links to the last observation "
+        help="Do not create redirect link files to the last observation "
         "(use for reprocessing a past interval that does not come up to the present)",
         action="store_true",
     )
