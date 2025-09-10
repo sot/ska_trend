@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Optional
 import agasc
 import astropy.units as u
 import chandra_aca.plot
+import jinja2
 import kadi.commands as kc
 import kadi.events as ke
 import numpy as np
@@ -26,7 +27,6 @@ from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
 from cheta import fetch, fetch_eng, fetch_sci
 from cxotime import CxoTime, CxoTimeLike
-from jinja2 import Environment
 from matplotlib import pyplot as plt
 from mica.archive import asp_l1
 from Quaternion import Quat
@@ -122,9 +122,19 @@ def raise_sporadic_exc_for_testing():
 
 
 @functools.lru_cache()
-def get_index_template():
-    path = Path(__file__).parent / "index_template.html"
-    return path.read_text()
+def get_template(template_name: str) -> jinja2.Template:
+    """Get a Jinja2 template by name.
+
+    Parameters
+    ----------
+    template_name : str
+        The name of the template file located in the same directory as this module.
+    """
+    path = Path(__file__).parent / template_name
+    env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True)
+    template = env.from_string(path.read_text())
+
+    return template
 
 
 @dataclass
@@ -704,6 +714,20 @@ def get_observations(
     return obss
 
 
+def write_redirect_html(target_dir: Path, redirect_file_path: Path):
+    """Make an HTML redirect file for multiple ways to the same observation."""
+    logger.debug(f"Making redirect HTML to {target_dir}/index.html")
+
+    template = get_template("redirect_template.html")
+    redirect_dir = target_dir.relative_to(redirect_file_path.parent, walk_up=True)
+    context = {"redirect_dir": redirect_dir}
+    html = template.render(**context)
+
+    redirect_file_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Writing {redirect_file_path}")
+    redirect_file_path.write_text(html)
+
+
 def write_index_html(obs: Observation, save_path: Path, traceback=None):
     """Make the HTML file for the observation."""
     raise_sporadic_exc_for_testing()
@@ -711,8 +735,7 @@ def write_index_html(obs: Observation, save_path: Path, traceback=None):
     logger.debug(f"Making HTML for observation {obs.obsid}")
 
     # Get the template from index_template.html
-    env = Environment(trim_blocks=True, lstrip_blocks=True)
-    template = env.from_string(get_index_template())
+    template = get_template("index_template.html")
     context = {
         "MICA_PORTAL": "https://kadi.cfa.harvard.edu/mica/",
         "obs": obs,
@@ -723,26 +746,6 @@ def write_index_html(obs: Observation, save_path: Path, traceback=None):
     save_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Writing {save_path}")
     save_path.write_text(html)
-
-
-def make_relative_symlink(target_path: Path, link_path: Path) -> None:
-    """Create a symbolic link named ``link_path`` pointing to ``target_path``.
-
-    This uses a relative path for the target_path to allow moving directories.
-
-    Parameters
-    ----------
-    target_path : Path
-        The source path the symbolic link points to.
-    link_path : Path
-        The destination path for the symbolic link.
-    """
-    if link_path.exists(follow_symlinks=False):
-        logger.debug(f"Removing existing file {link_path}")
-        link_path.unlink()
-    target_path_rel = target_path.relative_to(link_path.parent, walk_up=True)
-    logger.info(f"Linking {target_path_rel} to {link_path}")
-    link_path.symlink_to(target_path_rel)
 
 
 def get_centroid_resids_from_file(
@@ -1254,13 +1257,21 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
     report_dir = obs.path.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    # Make top-level symbolic links to the last observation. This is done for every
-    # observation to ensure that the links are always up to date, even if reprocessing
-    # old observations with no links. Use --no-last-link to skip this step in the case
-    # of reprocessing a chunk in the middle in the past.
+    # Make redirect HTML files to the last observation. This is done for every
+    # observation to ensure that the redirects are always up to date, even if
+    # reprocessing old observations. Use --no-last-link to skip this step in the case of
+    # reprocessing a chunk in the middle in the past.
     if not opt.no_last_links:
-        make_relative_symlink(obs.path.report_dir, obs.path.data_root / "last")
-        make_relative_symlink(obs.path.report_dir, obs.path.report_dir.parent / "last")
+        # Redirect from top-level last.html to last processed observation.
+        write_redirect_html(
+            target_dir=obs.path.report_dir,
+            redirect_file_path=obs.path.data_root / "last.html",
+        )
+        # Redirect from <LOAD_NAME>/last.html to report dir to get last obsid in load.
+        write_redirect_html(
+            target_dir=obs.path.report_dir,
+            redirect_file_path=obs.path.report_dir.parent / "last.html",
+        )
 
     # Allow for selective reprocessing by removing files
     for remove in opt.removes:
@@ -1315,13 +1326,12 @@ def make_obsid_dir_links(obs: Observation):
     obsid-based directory structure within ``obs.path.obsid_two_obsid_dir``. This is
     done to allow for back-compatible access from mica.
     """
-    in_dir = obs.path.report_dir
     out_dir = obs.path.obsid_two_obsid_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    for target_path in in_dir.glob("*"):
-        link_path = out_dir / target_path.name
-        make_relative_symlink(target_path, link_path)
+    write_redirect_html(
+        target_dir=obs.path.report_dir,
+        redirect_file_path=out_dir / "index.html",
+    )
 
 
 def main(args=None):
