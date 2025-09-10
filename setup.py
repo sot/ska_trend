@@ -41,7 +41,7 @@ setup(
             "wrong_box_anom/index_template.html",
             "wrong_box_anom/task_schedule.cfg",
             "bad_periscope_gradient/task_schedule.cfg",
-            "centroid_dashboard/index_template.html",
+            "centroid_dashboard/*_template.html",
             "centroid_dashboard/task_schedule.cfg",
             "fid_drop_mon/index_template.html",
             "fid_drop_mon/task_schedule.cfg",
