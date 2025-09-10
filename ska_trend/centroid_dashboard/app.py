@@ -740,7 +740,7 @@ def make_relative_symlink(target_path: Path, link_path: Path) -> None:
     if link_path.exists(follow_symlinks=False):
         logger.debug(f"Removing existing file {link_path}")
         link_path.unlink()
-    target_path_rel = os.path.relpath(target_path, start=link_path.parent)
+    target_path_rel = target_path.relative_to(link_path.parent, walk_up=True)
     logger.info(f"Linking {target_path_rel} to {link_path}")
     link_path.symlink_to(target_path_rel)
 
