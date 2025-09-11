@@ -327,6 +327,7 @@ def update_sources(sources, start, stop, filename=None):
     """
     Add the given sources to the sources file, removing any existing sources between start and stop.
     """
+
     filename = SOURCES_FILE if filename is None else filename
     # if the file exists, replace the entries in the (start, stop) range
     # with the newly processed ones
@@ -339,9 +340,12 @@ def update_sources(sources, start, stop, filename=None):
         sel = ~np.in1d(
             prev_sources["obsid"], get_obsids(start, stop)
         )
-        all_sources = vstack(
-            [prev_sources[sel], sources], metadata_conflicts="silent"
-        )
+        if not sources or len(sources) == 0:
+            all_sources = prev_sources[sel]
+        else:
+            all_sources = vstack(
+                [prev_sources[sel], sources], metadata_conflicts="silent"
+            )
     else:
         all_sources = sources
 
