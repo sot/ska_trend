@@ -117,6 +117,23 @@
       </div>
     </div>
 
+    <div class="accordion" id="accordionExclude">
+      <div class="accordion-item">
+        <h2 class="accordion-header" id="headingExclude">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseExclude" aria-expanded="true" aria-controls="collapseExclude">
+            Exclude this source
+          </button>
+        </h2>
+        <div id="collapseExclude" class="accordion-collapse collapse" aria-labelledby="headingExclude" data-bs-parent="#accordionExclude">
+          <div class="accordion-body">
+            <p> Login as aca and execute the following command: </p>
+            <p> <div id="astromon_command"> <pre> astromon-excluded-region add --obsid {{ source.obsid }} --ra {{ source.ra }} --dec {{ source.dec }} --radius 10 --comment "Excluded after inspection" </pre></div> </p>
+            <p> If this region should be excluded for all OBSIDs, remove the --obsid flag. Feel free to modify the comment. </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="accordion" id="accordionExample">
       <div class="accordion-item">
         <h2 class="accordion-header" id="headingOne">
@@ -175,6 +192,14 @@
     src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
     integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
     crossorigin="anonymous">
+  </script>
+
+  <script>
+    const element = document.getElementById('astromon_command');
+    element.addEventListener('click', () => {
+      const htmlContent = element.childNodes[1].innerHTML
+      navigator.clipboard.writeText(htmlContent);
+    });
   </script>
 
 </body>
