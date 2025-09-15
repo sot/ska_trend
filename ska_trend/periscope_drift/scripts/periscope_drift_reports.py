@@ -8,14 +8,11 @@ import re
 import sys
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import ska_helpers
-from astropy.table import Table, vstack
 from cxotime import CxoTime
 from cxotime import units as u
 
-from ska_trend.periscope_drift import observation, processing, reports
+from ska_trend.periscope_drift import processing, reports
 
 logger = logging.getLogger("periscope_drift")
 
@@ -125,41 +122,19 @@ def main():
 
     if not args.no_output:
 
-        time_ranges = [
-            {"start": stop - 30 * u.day, "stop": stop, "title": "30 days"},
-            {"start": stop - 90 * u.day, "stop": stop, "title": "90 days"},
-            {"start": stop - 180 * u.day, "stop": stop, "title": "180 days"},
-            {"start": stop - 365 * u.day, "stop": stop, "title": "1 year"},
-            {"start": stop - 5 * 365 * u.day, "stop": stop, "title": "5 year"},
-        ]
-        # exclude time ranges that do not add any data
-        time_ranges = [
-            time_ranges[idx]
-            for idx in range(len(time_ranges))
-            if idx == 0 or (time_ranges[idx - 1]["start"] > start_report)
-        ]
-
-        all_sources = processing.get_sources()
-
-        report_sources = all_sources[
-            np.in1d(all_sources["obsid"], processing.get_obsids(start_report, stop))
-        ]
-
-        report_observations = {
-            str(obsid): observation.Observation(
-                obsid, workdir=args.workdir, archive_dir=args.archive_dir
-            )
-            for obsid in np.unique(report_sources["obsid"])
-        }
-
-        reports.write_html_report(
-            time_ranges, args.output, report_observations, report_sources
+        reports.write_report(
+            start=start_report,
+            stop=stop,
+            output_dir=args.output,
+            archive_dir=args.archive_dir,
+            workdir=args.workdir,
         )
 
         with open(args.output / "errors.json", "w") as fh:
             json.dump(errors, fh)
 
         with open(args.output / "sources.json", "w") as fh:
+            all_sources = processing.get_sources()
             fh.write(all_sources.to_pandas().to_json())
 
 if __name__ == "__main__":

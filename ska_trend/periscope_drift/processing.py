@@ -221,7 +221,7 @@ def run_multiprocess(
 def process_interval(
     start,
     stop,
-    log_level="WARNING",
+    log_level=None,
     archive_dir=None,
     n_threads=8,
     show_progress=True,
@@ -257,11 +257,57 @@ def process_interval(
         List of tuples with the errors encountered during processing. Each tuple
         contains the obsid and the error message.
     """
+
+    return process_obsids(
+        get_obsids(start, stop),
+        log_level=log_level,
+        archive_dir=archive_dir,
+        n_threads=n_threads,
+        show_progress=show_progress,
+        workdir=workdir,
+        no_output=no_output,
+    )
+
+def process_obsids(
+    obsids,
+    log_level="WARNING",
+    archive_dir=None,
+    n_threads=8,
+    show_progress=True,
+    workdir=None,
+    no_output=False,
+):
+    """
+    Process all observations in the given time interval.
+
+    Parameters
+    ----------
+    obsids : list
+        List of obsids to process.
+    log_level : str
+        Logging level. One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
+    archive_dir : str
+        Archive directory. The final location where to archive data for future use.
+    n_threads : int
+        Number of threads to use for multiprocessing.
+    show_progress : bool
+        If True, show a progress bar.
+    workdir : str
+        Working directory. If this is None, a temporary directory will be created.
+        If it is not None, a subdirectory will be created to store temporary files.
+    no_output : bool
+        If True, do not write output.
+
+    Returns
+    -------
+    errors : list
+        List of tuples with the errors encountered during processing. Each tuple
+        contains the obsid and the error message.
+    """
     logger = basic_logger("astromon", level=log_level)
+    if log_level is not None:
+        logger.setLevel(log_level)
 
-    obsids = get_obsids(start, stop)
-
-    logger.info(f"Processing interval {start}-{stop}")
     logger.info(f"Processing {len(obsids)} observations with {n_threads} threads")
     results = run_multiprocess(
         obsids,
@@ -308,7 +354,7 @@ def process_interval(
         logger.debug(f"    OBSID={obsid}: {error}")
 
     if not no_output:
-        update_sources(Table(summary), start, stop)
+        update_sources(Table(summary), obsids)
 
     return errors
 
@@ -323,28 +369,25 @@ def get_sources(filename=None):
     return Table.read(filename)
 
 
-def update_sources(sources, start, stop, filename=None):
+def update_sources(sources, obsids, filename=None):
     """
-    Add the given sources to the sources file, removing any existing sources between start and stop.
+    Update the given sources, corresponding to the given obsids, in the sources file.
+
+    The obsids parameters is used to know which entries need to be modified. This matters only if
+    the observation has no sources, in which case we want to remove any previous entries.
     """
 
     filename = SOURCES_FILE if filename is None else filename
-    # if the file exists, replace the entries in the (start, stop) range
-    # with the newly processed ones
-
-    start = CxoTime(start)
-    stop = CxoTime(stop)
 
     if filename.exists():
+        # if the file exists, replace the entries with the newly processed ones
         prev_sources = get_sources(filename)
-        sel = ~np.in1d(
-            prev_sources["obsid"], get_obsids(start, stop)
-        )
+        prev_sources = prev_sources[~np.in1d(prev_sources["obsid"], obsids)]
         if not sources or len(sources) == 0:
-            all_sources = prev_sources[sel]
+            all_sources = prev_sources
         else:
             all_sources = vstack(
-                [prev_sources[sel], sources], metadata_conflicts="silent"
+                [prev_sources, sources], metadata_conflicts="silent"
             )
     else:
         all_sources = sources

@@ -12,6 +12,7 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from mica.archive.cda import get_ocat_web, get_proposal_abstract
 
+from ska_trend.periscope_drift import observation, processing
 from ska_trend.periscope_drift import plotly as plots
 
 __all__ = [
@@ -142,7 +143,7 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
 
 def write_html_report(time_ranges, outdir, observations, sources, overwrite=False):
     """
-    Render and write the main page.
+    Render and write the html pages (one main page and one per source).
 
     Parameters
     ----------
@@ -289,3 +290,69 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
         filename.parent.mkdir(exist_ok=True, parents=True)
     with open(filename, "w") as fh:
         fh.write(page)
+
+
+def write_report(
+        start,
+        stop,
+        output_dir,
+        sources=None,
+        report_observations=None,
+        archive_dir=None,
+        workdir=None
+    ):
+    """
+    Write reports for a given time interval. This calls all the write_* functions.
+
+    Parameters
+    ----------
+    start : CxoTime
+        Start time of the report.
+    stop : CxoTime
+        Stop time of the report.
+    output_dir : str or Path
+        Output directory.
+    sources : Table, optional
+        Table of sources to include in the report. If None (default), all sources
+        in the given time range are included.
+    report_observations : dict, optional
+        Dictionary of observation.Observation objects to use for the report. If None
+        (default), observations are created as needed.
+    archive_dir : str or Path, optional
+        Path to the archive directory. If None (default), the value of the
+        asreomon archive on $SKA/data is used.
+    workdir : str or Path, optional
+        Path to the work directory. If None (default), a temp directory is used.
+    """
+    time_ranges = [
+        {"start": stop - 30 * u.day, "stop": stop, "title": "30 days"},
+        {"start": stop - 90 * u.day, "stop": stop, "title": "90 days"},
+        {"start": stop - 180 * u.day, "stop": stop, "title": "180 days"},
+        {"start": stop - 365 * u.day, "stop": stop, "title": "1 year"},
+        {"start": stop - 5 * 365 * u.day, "stop": stop, "title": "5 year"},
+    ]
+    # exclude time ranges that do not add any data
+    time_ranges = [
+        time_ranges[idx]
+        for idx in range(len(time_ranges))
+        if idx == 0 or (time_ranges[idx - 1]["start"] > start)
+    ]
+
+    if sources is None:
+        sources = processing.get_sources()
+
+        report_sources = sources[
+            np.in1d(sources["obsid"], processing.get_obsids(start, stop))
+        ]
+
+    if report_observations is None:
+        report_observations = {
+            str(obsid): observation.Observation(
+                obsid, workdir=workdir, archive_dir=archive_dir
+            )
+            for obsid in np.unique(report_sources["obsid"])
+        }
+
+    write_html_report(
+        time_ranges, output_dir, report_observations, report_sources
+    )
