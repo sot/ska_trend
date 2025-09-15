@@ -33,7 +33,9 @@ __all__ = [
 ]
 
 
-SOURCES_FILE = Path(os.environ["SKA"]) / "data" / "periscope_drift_reports" / "sources.fits"
+SOURCES_FILE = (
+    Path(os.environ["SKA"]) / "data" / "periscope_drift_reports" / "sources.fits"
+)
 
 
 def get_obsids(tstart, tstop):
@@ -268,6 +270,7 @@ def process_interval(
         no_output=no_output,
     )
 
+
 def process_obsids(
     obsids,
     log_level="WARNING",
@@ -386,9 +389,7 @@ def update_sources(sources, obsids, filename=None):
         if not sources or len(sources) == 0:
             all_sources = prev_sources
         else:
-            all_sources = vstack(
-                [prev_sources, sources], metadata_conflicts="silent"
-            )
+            all_sources = vstack([prev_sources, sources], metadata_conflicts="silent")
     else:
         all_sources = sources
 

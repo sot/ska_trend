@@ -293,14 +293,14 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
 
 
 def write_report(
-        start,
-        stop,
-        output_dir,
-        sources=None,
-        report_observations=None,
-        archive_dir=None,
-        workdir=None
-    ):
+    start,
+    stop,
+    output_dir,
+    sources=None,
+    report_observations=None,
+    archive_dir=None,
+    workdir=None,
+):
     """
     Write reports for a given time interval. This calls all the write_* functions.
 
@@ -353,6 +353,4 @@ def write_report(
             for obsid in np.unique(report_sources["obsid"])
         }
 
-    write_html_report(
-        time_ranges, output_dir, report_observations, report_sources
-    )
+    write_html_report(time_ranges, output_dir, report_observations, report_sources)

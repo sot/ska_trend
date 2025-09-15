@@ -121,7 +121,6 @@ def main():
             json.dump(errors, fh)
 
     if not args.no_output:
-
         reports.write_report(
             start=start_report,
             stop=stop,
@@ -136,6 +135,7 @@ def main():
         with open(args.output / "sources.json", "w") as fh:
             all_sources = processing.get_sources()
             fh.write(all_sources.to_pandas().to_json())
+
 
 if __name__ == "__main__":
     main()
