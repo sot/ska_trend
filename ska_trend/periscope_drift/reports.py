@@ -300,6 +300,7 @@ def write_report(
     report_observations=None,
     archive_dir=None,
     workdir=None,
+    overwrite=False,
 ):
     """
     Write reports for a given time interval. This calls all the write_* functions.
@@ -353,4 +354,6 @@ def write_report(
             for obsid in np.unique(report_sources["obsid"])
         }
 
-    write_html_report(time_ranges, output_dir, report_observations, report_sources)
+    write_html_report(
+        time_ranges, output_dir, report_observations, report_sources, overwrite=overwrite
+    )
