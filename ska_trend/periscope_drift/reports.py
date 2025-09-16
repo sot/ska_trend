@@ -11,6 +11,7 @@ from astromon.db import is_in_excluded_region
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from mica.archive.cda import get_ocat_web, get_proposal_abstract
+from tqdm import tqdm
 
 from ska_trend.periscope_drift import observation, processing
 from ska_trend.periscope_drift import plotly as plots
@@ -141,7 +142,7 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
     return result
 
 
-def write_html_report(time_ranges, outdir, observations, sources, overwrite=False):
+def write_html_report(time_ranges, outdir, observations, sources, overwrite=False, show_progress=False):
     """
     Render and write the html pages (one main page and one per source).
 
@@ -176,7 +177,8 @@ def write_html_report(time_ranges, outdir, observations, sources, overwrite=Fals
 
     # the sources
     source_files = []
-    for obsid, src_id in sources["obsid", "id"]:
+    src_iter = tqdm(sources["obsid", "id"]) if show_progress else sources["obsid", "id"]
+    for obsid, src_id in src_iter:
         obs = observations[str(obsid)]
         src_file = (
             Path("sources")
@@ -301,6 +303,7 @@ def write_report(
     archive_dir=None,
     workdir=None,
     overwrite=False,
+    show_progress=False,
 ):
     """
     Write reports for a given time interval. This calls all the write_* functions.
@@ -355,5 +358,16 @@ def write_report(
         }
 
     write_html_report(
-        time_ranges, output_dir, report_observations, report_sources, overwrite=overwrite
+        time_ranges, output_dir, report_observations, report_sources, overwrite=overwrite, show_progress=show_progress
     )
+
+    with open(Path(output_dir) / "args.json", "w") as fh:
+        args = {
+            "start": start,
+            "stop": stop,
+            "output_dir": output_dir,
+            "archive_dir": archive_dir,
+            "workdir": workdir,
+            "overwrite": False,
+        }
+        json.dump(args, fh, indent=2, default=str)
