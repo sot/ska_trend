@@ -142,7 +142,9 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
     return result
 
 
-def write_html_report(time_ranges, outdir, observations, sources, overwrite=False, show_progress=False):
+def write_html_report(
+    time_ranges, outdir, observations, sources, overwrite=False, show_progress=False
+):
     """
     Render and write the html pages (one main page and one per source).
 
@@ -358,7 +360,12 @@ def write_report(
         }
 
     write_html_report(
-        time_ranges, output_dir, report_observations, report_sources, overwrite=overwrite, show_progress=show_progress
+        time_ranges,
+        output_dir,
+        report_observations,
+        report_sources,
+        overwrite=overwrite,
+        show_progress=show_progress,
     )
 
     with open(Path(output_dir) / "args.json", "w") as fh:
