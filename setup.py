@@ -8,6 +8,7 @@ entry_points = {
         "ska_trend_centroid_dashboard=ska_trend.centroid_dashboard.app:main",
         "ska_trend_fid_drop_mon_update=ska_trend.fid_drop_mon.update:main",
         "ska_trend_periscope_drift=ska_trend.periscope_drift.scripts.periscope_drift_reports:main",
+        "ska_trend_periscope_drift_regenerate=ska_trend.periscope_drift.scripts.periscope_drift_regenerate_reports:main",
         "ska_trend_vv_trend_update_plots=ska_trend.vv_trend.update:main",
     ]
 }
