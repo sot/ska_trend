@@ -112,7 +112,7 @@ def main():
         stop,
         archive_dir=args.archive_dir,
         workdir=args.workdir,
-        log_level=args.log_level,
+        log_level=args.log_level.upper(),
         show_progress=args.show_progress,
     )
 
