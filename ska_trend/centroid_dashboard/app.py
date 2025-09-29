@@ -1328,6 +1328,11 @@ def make_obsid_dir_links(obs: Observation):
     """
     out_dir = obs.path.obsid_two_obsid_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Remove any symbolic link in out_dir
+    for path in out_dir.iterdir():
+        if path.is_symlink():
+            logger.info(f"Removing existing symlink {path}")
+            path.unlink()
     write_redirect_html(
         target_dir=obs.path.report_dir,
         redirect_file_path=out_dir / "index.html",
