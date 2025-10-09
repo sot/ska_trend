@@ -90,8 +90,8 @@ def get_opt():
     )
     parser.add_argument(
         "--no-last-links",
-        help="Do not create redirect link files to the last observation "
-        "(use for reprocessing a past interval that does not come up to the present)",
+        help="Do not create redirect link files to the last observation. This is "
+        "automatically set if ``--stop`` is supplied.",
         action="store_true",
     )
     parser.add_argument(
@@ -1328,6 +1328,11 @@ def make_obsid_dir_links(obs: Observation):
     """
     out_dir = obs.path.obsid_two_obsid_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Remove any symbolic link in out_dir
+    for path in out_dir.iterdir():
+        if path.is_symlink():
+            logger.info(f"Removing existing symlink {path}")
+            path.unlink()
     write_redirect_html(
         target_dir=obs.path.report_dir,
         redirect_file_path=out_dir / "index.html",
@@ -1340,6 +1345,12 @@ def main(args=None):
 
     opt = get_opt().parse_args(args)
     logger.setLevel(opt.log_level)
+
+    # Require --no-last-links if a non-NOW stop was specified for reprocessing an
+    # interval. Otherwise it is too easy to corrupt the last links accidentally.
+    if opt.stop is not CxoTime.NOW:
+        logger.info("--stop time specified, setting --no-last-links")
+        opt.no_last_links = True
 
     stop = CxoTime(opt.stop)
     start = CxoTime(opt.start) if opt.start else stop - NDAYS_DEFAULT * u.day
