@@ -109,9 +109,56 @@ class PeriscopeDriftData:
             )
         )
 
-    def is_selected_source(self, source, exclude_regions=True):
-        # sources are also excluded based on astromon's excluded regions, but we do not consider
-        # that here by default. The reason is that the excluded regions can be modified at any time.
+    @staticmethod
+    def is_selected_source(source, exclude_regions=True):
+        """
+        Return a boolean array indicating which sources are selected.
+
+        The function can optionally exclude sources in astromon excluded regions. Excluded regions
+        can change at any time, so by default we do not use them when caching source data.
+
+        Parameters
+        ----------
+        source : astropy.table.Table
+            Table with source data.
+        exclude_regions : bool, optional
+            Whether to exclude sources in excluded regions, by default True.
+        Returns
+        -------
+        numpy.ndarray
+            Boolean array indicating which sources are selected.
+        """
+        result = (
+            PeriscopeDriftData.is_pre_selected_source(source)
+            & (source["snr"] > 90)
+            & (source["psfratio"] < 1.2)
+        )
+        if exclude_regions:
+            excluded = is_in_excluded_region(
+                SkyCoord(source["ra"] * u.deg, source["dec"] * u.deg), source["obsid"]
+            )
+            result &= ~excluded
+        return result
+
+    @staticmethod
+    def is_pre_selected_source(source):
+        """
+        Return a boolean array indicating which sources are pre-selected.
+
+        This method is intended to to reduce the number of sources before processing. It is not the
+        final selection. As such, the criteria are looser than those in is_selected_source. The idea
+        is that we often want to see how the pre-selected sources behave even if they do not pass.
+
+        Parameters
+        ----------
+        source : astropy.table.Table
+            Table with source data.
+
+        Returns
+        -------
+        numpy.ndarray
+            Boolean array indicating which sources are pre-selected.
+        """
         result = (
             (source["snr"] > 3)
             & (source["net_counts"] > 200)
@@ -120,13 +167,7 @@ class PeriscopeDriftData:
             & (source["near_neighbor_dist"] > 6)
             # psfratio is the ratio of the source ellipse to the PSF size
             & (source["psfratio"] < 3.0)
-            # & ~excluded
         )
-        if exclude_regions:
-            excluded = is_in_excluded_region(
-                SkyCoord(source["ra"] * u.deg, source["dec"] * u.deg), source["obsid"]
-            )
-            result &= ~excluded
         return result
 
     def get_events(self):
@@ -346,7 +387,9 @@ class PeriscopeDriftData:
 
     @stored_result("source_data", fmt="pickle", subdir="cache")
     def get_source_data(self):
-        src = self.get_sources()
+        src = self.get_sources(apply_filter=False)
+        selected = self.is_pre_selected_source(src)
+        src = src[selected]
         events = self.get_events()
         correction = self.get_expected_correction()
 
@@ -356,14 +399,20 @@ class PeriscopeDriftData:
             for source in src
             if (dat := process_source(self.obs, source, events, correction))
         }
-        src = src[np.in1d(src["id"], list(binned_data.keys()))]
         return binned_data
 
     def get_periscope_drift_data(self):
+        data = self.get_source_data()
+        src = self.get_sources()
+
+        source_ids = list(set(data.keys()) & set(src["id"]))
+
+        src = src[np.in1d(src["id"], source_ids)]
+        data = {sid: data[sid] for sid in source_ids}
         return ObservationData(
             summary=self.get_summary(),
-            sources=self.get_sources(),
-            data=self.get_source_data(),
+            sources=src,
+            data=data,
             expected_correction=self.get_expected_correction(),
         )
 
