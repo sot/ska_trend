@@ -12,7 +12,6 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from astromon.utils import CiaoProcessFailure
 from astropy.table import Table, vstack
 from cxotime import CxoTime
