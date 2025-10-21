@@ -196,7 +196,7 @@ class PeriscopeDriftData:
 
     @stored_result("periscope_drift_sources", fmt="table", subdir="cache")
     def get_sources(self, apply_filter=True):
-        src = self.obs.get_sources(version="celldetect")
+        src = self.obs.get_sources(version="gaussian_detect")
 
         if len(src) == 0:
             # and we use ID often to traverse the table... so make sure the column exists
