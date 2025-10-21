@@ -31,7 +31,9 @@ from cxotime import CxoTime
 from Quaternion import Quat
 from scipy.interpolate import BSpline, make_smoothing_spline
 
-from ska_trend.periscope_drift.correction import get_expected_correction
+from ska_trend.periscope_drift.correction import (
+    get_expected_correction as _get_expected_correction,
+)
 
 logger = logging.getLogger("periscope_drift")
 
@@ -230,7 +232,7 @@ class PeriscopeDriftData:
         stop = CxoTime(float(obs_info["tstop"]))
         telem = fetch_telemetry(start, stop)
 
-        corr = get_expected_correction(telem)
+        corr = self.get_expected_correction()
 
         if len(telem["time"]) > 0:
             src["d_OOBAGRD3"] = telem["OOBAGRD3"].max() - telem["OOBAGRD3"].min()
@@ -293,13 +295,18 @@ class PeriscopeDriftData:
 
         return src
 
-    @stored_result("periscope_drift_summary", fmt="pickle", subdir="cache")
-    def get_summary(self):
+    @stored_result("expected_correction", fmt="pickle", subdir="cache")
+    def get_expected_correction(self):
         obspar = self.obs.get_obspar()
         tstart = float(obspar["tstart"])
         tstop = float(obspar["tstop"])
         telem = fetch_telemetry(CxoTime(tstart), CxoTime(tstop))
-        correction = get_expected_correction(telem)
+        return _get_expected_correction(telem)
+
+    @stored_result("periscope_drift_summary", fmt="pickle", subdir="cache")
+    def get_summary(self):
+        obspar = self.obs.get_obspar()
+        correction = self.get_expected_correction()
 
         # maybe the corresponding stuff in get_sources should be removed
         info = {
@@ -326,8 +333,8 @@ class PeriscopeDriftData:
             {
                 "obsid_selected": self.is_selected(),
                 "OOBAGRD_corr_angle": correction["OOBAGRD_corr_angle"],
-                "tstart": tstart,
-                "tstop": tstop,
+                "tstart": float(obspar["tstart"]),
+                "tstop": float(obspar["tstop"]),
                 "datamode": obspar.get("datamode", ""),
                 "readmode": obspar.get("readmode", ""),
                 "dtycycle": obspar.get("dtycycle", -1),
@@ -335,17 +342,11 @@ class PeriscopeDriftData:
         )
         return info
 
-    @stored_result("periscope_drift_data", fmt="pickle", subdir="cache")
-    def get_periscope_drift_data(self):
+    @stored_result("source_data", fmt="pickle", subdir="cache")
+    def get_source_data(self):
         src = self.get_sources()
         events = self.get_events()
-        telem = fetch_telemetry(
-            CxoTime(float(self.obs.get_obspar()["tstart"])),
-            CxoTime(float(self.obs.get_obspar()["tstop"])),
-        )
-        correction = get_expected_correction(telem)
-
-        info = self.get_summary()
+        correction = self.get_expected_correction()
 
         # process all sources
         binned_data = {
@@ -354,12 +355,14 @@ class PeriscopeDriftData:
             if (dat := process_source(self.obs, source, events, correction))
         }
         src = src[np.in1d(src["id"], list(binned_data.keys()))]
+        return binned_data
 
+    def get_periscope_drift_data(self):
         return ObservationData(
-            summary=info,
-            sources=src,
-            data=binned_data,
-            expected_correction=correction,
+            summary=self.get_summary(),
+            sources=self.get_sources(),
+            data=self.get_source_data(),
+            expected_correction=self.get_expected_correction(),
         )
 
     def fetch_telemetry(self):
