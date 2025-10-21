@@ -162,7 +162,9 @@ class PeriscopeDriftData:
             clobber="yes",
             logging_tag=str(self),
         )
-        events = table.Table.read(outfile, hdu=1)
+        # calling as_array converts to native byteorder
+        # (some tools like pandas and seaborn do not support big endian on little endian machines)
+        events = table.Table(table.Table.read(outfile, hdu=1).as_array())
         events["yag"], events["zag"] = radec_to_yagzag(events["RA"], events["DEC"], att)
 
         if len(events) > 0:
