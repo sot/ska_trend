@@ -304,10 +304,7 @@ class PeriscopeDriftData:
         src["acis"] = self.obs.is_acis
         src["hrc"] = self.obs.is_hrc
 
-        src["theta"] = [
-            self.obs.dmcoords("theta", option="cel", celfmt="deg", ra=ra, dec=dec)
-            for ra, dec in src[["ra", "dec"]]
-        ]
+        src["theta"] = self.obs.get_off_axis_angle(ra=src["ra"], dec=src["dec"])
 
         formats = {
             "ra": ".5f",
