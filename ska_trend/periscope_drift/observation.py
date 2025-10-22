@@ -244,8 +244,25 @@ class PeriscopeDriftData:
         src = self.obs.get_sources(version="gaussian_detect")
 
         if len(src) == 0:
-            # and we use ID often to traverse the table... so make sure the column exists
-            return table.Table(dtype=[("id", int)])
+            dtype = np.dtype(
+                [
+                    ("obsid", ">i8"),
+                    ("id", ">i4"),
+                    ("ra", ">f8"),
+                    ("dec", ">f8"),
+                    ("net_counts", ">f4"),
+                    ("y_angle", ">f8"),
+                    ("z_angle", ">f8"),
+                    ("r_angle", ">f8"),
+                    ("snr", ">f4"),
+                    ("near_neighbor_dist", ">f8"),
+                    ("psfratio", ">f4"),
+                    ("pileup", ">f4"),
+                    ("acis_streak", "?"),
+                    ("caldb_version", "<U6"),
+                ]
+            )
+            return table.Table(dtype=dtype)
 
         obs_info = self.obs.get_info()
         att = Quat([obs_info["ra_nom"], obs_info["dec_nom"], obs_info["roll_nom"]])
