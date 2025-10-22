@@ -417,7 +417,7 @@ class PeriscopeDriftData:
 
     def get_periscope_drift_data(self):
         data = self.get_source_data()
-        src = self.get_sources()
+        src = self.get_sources(apply_filter=False)
 
         source_ids = list(set(data.keys()) & set(src["id"]))
 
