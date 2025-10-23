@@ -350,7 +350,18 @@ def write_report(
         report_sources = sources[
             np.in1d(sources["obsid"], processing.get_obsids(start, stop))
         ]
+
+        # select only sources that are selected according to fixed criteria
         selected = observation.PeriscopeDriftData.is_selected_source(report_sources)
+        selected &= report_sources["n_points"] > 2
+        # exclude sources that are in the excluded sources list
+        selected &= ~np.array(
+            [
+                (src["obsid"], src["id"]) in processing.get_excluded_sources()
+                for src in report_sources
+            ]
+        )
+
         report_sources = report_sources[selected]
     else:
         report_sources = sources

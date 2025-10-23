@@ -2,6 +2,7 @@
 Top-level functions to process periscope drift trending.
 """
 
+import json
 import logging
 import os
 import re
@@ -32,9 +33,11 @@ __all__ = [
 ]
 
 
-SOURCES_FILE = (
-    Path(os.environ["SKA"]) / "data" / "periscope_drift_reports" / "sources.fits"
-)
+DATA_DIR = Path(os.environ["SKA"]) / "data" / "periscope_drift_reports"
+
+SOURCES_FILE = DATA_DIR / "sources.fits"
+
+EXCLUDED_SOURCES_FILE = DATA_DIR / "excluded_sources.json"
 
 
 def get_obsids(tstart, tstop):
@@ -394,3 +397,17 @@ def update_sources(sources, obsids, filename=None):
         all_sources = sources
 
     all_sources.write(filename, overwrite=True)
+
+
+def get_excluded_sources():
+    """
+    Get excluded sources on file.
+    """
+    filename = EXCLUDED_SOURCES_FILE
+    if not filename.exists():
+        return {}
+
+    with open(filename, "r") as f:
+        data = json.load(f)
+        data = {(src["obsid"], src["id"]): src for src in data}
+    return data
