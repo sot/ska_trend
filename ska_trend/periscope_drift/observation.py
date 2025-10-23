@@ -598,7 +598,7 @@ def process_source(
     zag = zag_vs_time(x)
     d_zag = np.max(zag) - np.min(zag)
 
-    d_r = np.max(np.sqrt(yag**2 + zag**2))
+    d_r = np.max(np.sqrt((yag - np.min(yag))**2 + (zag - np.min(zag))**2))
 
     results = {
         "src_id": source["id"],
