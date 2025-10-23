@@ -632,6 +632,7 @@ def process_source(
     src_summary = dict(source)
     src_summary["OOBAGRD_corr_angle"] = correction["OOBAGRD_corr_angle"]
     src_summary["tstart"] = obs.get_info()["tstart"]
+    src_summary["n_points"] = len(binned_data)
     src_summary.update(results)
 
     return SourceData(
