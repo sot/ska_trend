@@ -350,6 +350,10 @@ def write_report(
         report_sources = sources[
             np.in1d(sources["obsid"], processing.get_obsids(start, stop))
         ]
+        selected = observation.PeriscopeDriftData.is_selected_source(report_sources)
+        report_sources = report_sources[selected]
+    else:
+        report_sources = sources
 
     if report_observations is None:
         report_observations = {
