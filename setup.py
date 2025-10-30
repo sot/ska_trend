@@ -9,6 +9,7 @@ entry_points = {
         "ska_trend_fid_drop_mon_update=ska_trend.fid_drop_mon.update:main",
         "ska_trend_periscope_drift=ska_trend.periscope_drift.scripts.periscope_drift_reports:main",
         "ska_trend_vv_trend_update_plots=ska_trend.vv_trend.update:main",
+        "ska_trend_no_dither_check=ska_trend.no_dither_check.no_dither_check:main",
     ]
 }
 
@@ -32,6 +33,7 @@ setup(
         "ska_trend.bad_periscope_gradient",
         "ska_trend.centroid_dashboard",
         "ska_trend.fid_drop_mon",
+        "ska_trend.no_dither_check"
         "ska_trend.periscope_drift",
         "ska_trend.periscope_drift.scripts",
         "ska_trend.vv_trend",
@@ -45,6 +47,7 @@ setup(
             "centroid_dashboard/task_schedule.cfg",
             "fid_drop_mon/index_template.html",
             "fid_drop_mon/task_schedule.cfg",
+            "no_dither_check/task_schedule.cfg",
             "vv_trend/index_template.html",
             "vv_trend/task_schedule.cfg",
         ],
