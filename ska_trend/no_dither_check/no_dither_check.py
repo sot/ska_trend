@@ -4,11 +4,7 @@
 import argparse
 import smtplib
 from email.mime.text import MIMEText
-from pathlib import Path
 
-import numpy as np
-from astropy.table import Table, vstack
-from cxotime import CxoTime
 from mica.archive.cda import get_ocat_local
 from ska_helpers.logging import basic_logger
 
@@ -44,10 +40,11 @@ def check_for_no_dither():
     ocat = get_ocat_local()
     cycle_start = 27
     # get the no dither science observations at/after proposal cycle 27
-    no_dither_obs = ocat[(ocat["prop_cycle"] >= str(cycle_start))
-                    & (ocat["obsid"] < 38000)
-                    & ((ocat["dither"] == "N")
-                    | ((ocat["y_amp"] == 0) | (ocat["z_amp"] == 0)))]
+    no_dither_obs = ocat[
+        (ocat["prop_cycle"] >= str(cycle_start))
+        & (ocat["obsid"] < 38000)
+        & ((ocat["dither"] == "N") | ((ocat["y_amp"] == 0) | (ocat["z_amp"] == 0)))
+    ]
     return no_dither_obs
 
 
@@ -56,8 +53,7 @@ def send_process_email(opt, no_dither_obs):
     text = [
         "No dither science observations found in ocat for prop cycle >= 27: <br></br>",
     ]
-    for obsid in no_dither_obs["obsid"]:
-        text.append(f" obsid: {obsid} <br></br>")
+    text.extend([f" obsid: {obsid} <br></br>" for obsid in no_dither_obs["obsid"]])
     msg = MIMEText("\n".join(text), "html")
     msg["Subject"] = subject
     me = "aca@cfa.harvard.edu"
@@ -74,7 +70,6 @@ def main(sys_args=None):
     no_dither_obs = check_for_no_dither()
 
     if len(no_dither_obs) > 0:
-
         logger.info(f"Sending email alert for {len(no_dither_obs)} obsids")
         send_process_email(opt, no_dither_obs)
 
