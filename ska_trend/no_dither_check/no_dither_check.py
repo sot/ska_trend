@@ -54,10 +54,10 @@ def check_for_no_dither():
 def send_process_email(opt, no_dither_obs):
     subject = "No dither science observations found in ocat for prop cycle >= 27"
     text = [
-        "No dither science observations found in ocat for prop cycle >= 27:",
+        "No dither science observations found in ocat for prop cycle >= 27: <br></br>",
     ]
     for obsid in no_dither_obs["obsid"]:
-        text.append(f" obsid: {obsid}")
+        text.append(f" obsid: {obsid} <br></br>")
     msg = MIMEText("\n".join(text), "html")
     msg["Subject"] = subject
     me = "aca@cfa.harvard.edu"
@@ -70,7 +70,6 @@ def send_process_email(opt, no_dither_obs):
 def main(sys_args=None):
     opt = get_opt().parse_args(sys_args)
 
-    Path(opt.out_dir).mkdir(parents=True, exist_ok=True)
     logger.info("Checking for no dither observations")
     no_dither_obs = check_for_no_dither()
 

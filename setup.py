@@ -33,7 +33,7 @@ setup(
         "ska_trend.bad_periscope_gradient",
         "ska_trend.centroid_dashboard",
         "ska_trend.fid_drop_mon",
-        "ska_trend.no_dither_check"
+        "ska_trend.no_dither_check",
         "ska_trend.periscope_drift",
         "ska_trend.periscope_drift.scripts",
         "ska_trend.vv_trend",
