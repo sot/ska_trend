@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import arviz as az
 import astromon
 import astromon.observation
 import numpy as np
+import pymc as pm
 import scipy
 import scipy.interpolate
 import ska_numpy
@@ -32,6 +34,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 from chandra_aca.transform import radec_to_yagzag
 from cheta import fetch
 from cxotime import CxoTime
+from patsy import dmatrix
 from Quaternion import Quat
 from scipy.interpolate import BSpline, make_smoothing_spline
 
@@ -613,6 +616,8 @@ def process_source(
 
     r_corr = np.sqrt(correction["ang_y_corr"] ** 2 + correction["ang_y_corr"] ** 2)
 
+    combined_fit = bayesian_fit(source, matches)
+
     src_summary = dict(source)
     src_summary.update(
         {
@@ -657,6 +662,112 @@ def process_source(
         yag_vs_time=spline_fit["smooth_spline_yag"],
         zag_vs_time=spline_fit["smooth_spline_zag"],
         spline_fit=spline_fit,
+    )
+
+
+def bayesian_fit(source, matches, seed=None):
+    """
+    Perform a Bayesian fit to the source event distribution.
+    """
+    rng = np.random.default_rng(seed)
+
+    n = source["net_counts"] / (1 + 1. / source["snr"])
+    num_knots = int(n // 200) - 1
+    knot_list = np.percentile(matches["rel_time"].data, np.linspace(0, 100, num_knots + 2))[1:-1]
+
+    spline_basis = dmatrix(
+        "bs(rel_time, knots=knots, degree=3, include_intercept=True) - 1",
+        {"rel_time": matches["rel_time"].data, "knots": knot_list},
+    )
+
+    COORDS = {
+        "yag": np.arange(spline_basis.shape[1]),
+        "zag": np.arange(spline_basis.shape[1]),
+    }
+
+    yag = matches["residual_yag"].data
+    zag = matches["residual_zag"].data
+    with pm.Model(coords=COORDS) as model:
+        yag_w = pm.Normal("yag_w", mu=0, sigma=3, size=spline_basis.shape[1], dims="yag")
+        yag_mu = pm.Deterministic(
+            "yag_mu",
+            pm.math.dot(np.asarray(spline_basis, order="F"), yag_w.T),
+        )
+        yag_sigma = pm.Exponential("yag_sigma", 1)
+        yag_signal = pm.Normal.dist(mu=yag_mu, sigma=yag_sigma)
+
+        zag_w = pm.Normal("zag_w", mu=0, sigma=3, size=spline_basis.shape[1], dims="zag")
+        zag_mu = pm.Deterministic(
+            "zag_mu",
+            pm.math.dot(np.asarray(spline_basis, order="F"), zag_w.T),
+        )
+        zag_sigma = pm.Exponential("zag_sigma", 1)
+        zag_signal = pm.Normal.dist(mu=zag_mu, sigma=zag_sigma)
+
+        noise = pm.Uniform.dist(-4, 4)
+        # these three lines implement a flat prior
+        # f_signal = pm.Uniform("f", 0, 1)
+        # yag_dist = pm.Mixture(
+        #     "yag_dist", w=[f_signal, 1 - f_signal], comp_dists=[yag_signal, noise], observed=yag
+        # )
+        # zag_dist = pm.Mixture(
+        #     "zag_dist", w=[f_signal, 1 - f_signal], comp_dists=[zag_signal, noise], observed=zag
+        # )
+        # whereas these three lines implement a (better) Dirichlet prior
+        f_signal = pm.Dirichlet("f", a=[1, 1])  # 2 mixture weights
+
+        pm.Mixture("yag_dist", w=f_signal, comp_dists=[yag_signal, noise], observed=yag)
+        pm.Mixture("zag_dist", w=f_signal, comp_dists=[zag_signal, noise], observed=zag)
+
+    with model:
+        idata = pm.sample_prior_predictive()
+        idata.extend(
+            pm.sample(
+                nuts_sampler="nutpie",
+                draws=1000,
+                tune=1000,
+                random_seed=rng,
+                chains=4,
+            )
+        )
+        pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+
+    df = az.summary(idata, var_names=["yag_w", "yag_sigma", "zag_w", "zag_sigma", "f"])
+    params = {
+        "time_range": (matches["rel_time"].min(), matches["rel_time"].max()),
+        "knots": knot_list,
+        "dirichlet_alpha": table.Table([dict(df.loc[f"f[{i}]"]) for i in range(2)]),
+        "yag_coefficients": table.Table(
+            [dict(df.loc[f"yag_w[{i}]"]) for i in range(spline_basis.shape[1])]
+        ),
+        "zag_coefficients": table.Table(
+            [dict(df.loc[f"zag_w[{i}]"]) for i in range(spline_basis.shape[1])]
+        ),
+        "yag_sigma": dict(df.loc["yag_sigma"]),
+        "zag_sigma": dict(df.loc["zag_sigma"]),
+    }
+    return model, idata, params
+
+
+def get_basis_spline_design_matrix(time, knots):
+    """
+    This returns the design matrix for a B-spline basis with given knots.
+
+    Parameters
+    ----------
+    time : array-like
+        Time values where to evaluate the spline basis. Shape (n_samples,).
+    knots : array-like
+        Knots for the B-spline basis. Shape (n_knots,).
+
+    Returns
+    -------
+    numpy.ndarray
+        Design matrix for the B-spline basis. Shape (n_samples, n_basis).
+    """
+    return dmatrix(
+        "bs(rel_time, knots=knots, degree=3, include_intercept=True) - 1",
+        {"rel_time": time, "knots": knots},
     )
 
 
