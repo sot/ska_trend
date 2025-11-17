@@ -7,9 +7,7 @@ from pathlib import Path
 
 import jinja2
 import numpy as np
-from astromon.db import is_in_excluded_region
 from astropy import units as u
-from astropy.coordinates import SkyCoord
 from mica.archive.cda import get_ocat_web, get_proposal_abstract
 from tqdm import tqdm
 
@@ -167,13 +165,6 @@ def write_html_report(
         "`sources/${String(Math.floor(Number(obsid) / 1e3)).padStart(2, '0')}"
         "/${obsid}/${src_id}/index.html`"
     )
-
-    # astromon excluded regions can change at any time, and cache data might not reflect that,
-    # so we determine whether sources are excluded when writing the report
-    excluded = is_in_excluded_region(
-        SkyCoord(sources["ra"] * u.deg, sources["dec"] * u.deg), sources["obsid"]
-    )
-    sources = sources[~excluded]
 
     context = {"source_report_path": source_report_path}
 
@@ -352,14 +343,8 @@ def write_report(
         ]
 
         # select only sources that are selected according to fixed criteria
-        selected = observation.PeriscopeDriftData.is_selected_source(report_sources)
-        selected &= report_sources["n_points"] > 2
-        # exclude sources that are in the excluded sources list
-        selected &= ~np.array(
-            [
-                (src["obsid"], src["id"]) in processing.get_excluded_sources()
-                for src in report_sources
-            ]
+        selected = observation.PeriscopeDriftData.is_selected_source(
+            report_sources, exclude_regions=True
         )
 
         report_sources = report_sources[selected]

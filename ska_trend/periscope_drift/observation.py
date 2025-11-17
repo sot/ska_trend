@@ -7,8 +7,10 @@ The Observation class is a subclass of astromon.observation.Observation.
 
 import functools
 import logging
+import os
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import astromon
@@ -36,6 +38,11 @@ from ska_trend.periscope_drift.correction import (
 )
 
 logger = logging.getLogger("periscope_drift")
+
+
+EXCLUDED_SOURCES_FILE = (
+    Path(os.environ["SKA"]) / "data" / "periscope_drift_reports" / "excluded_sources.h5"
+)
 
 
 GRADIENTS = [
@@ -132,12 +139,11 @@ class PeriscopeDriftData:
             PeriscopeDriftData.is_pre_selected_source(source)
             & (source["snr"] > 90)
             & (source["psfratio"] < 1.2)
+            & (source["n_points"] > 2)
         )
         if exclude_regions:
-            excluded = is_in_excluded_region(
-                SkyCoord(source["ra"] * u.deg, source["dec"] * u.deg), source["obsid"]
-            )
-            result &= ~excluded
+            pos = SkyCoord(source["ra"] * u.deg, source["dec"] * u.deg)
+            result &= ~is_in_excluded_region(pos, source["obsid"], dbfile=EXCLUDED_SOURCES_FILE)
         return result
 
     @staticmethod
