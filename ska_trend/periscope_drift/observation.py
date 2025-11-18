@@ -19,6 +19,7 @@ import numpy as np
 import scipy
 import scipy.interpolate
 import ska_numpy
+from astromon import source_detection
 from astromon.db import is_in_excluded_region
 from astromon.stored_result import StorableClass, stored_result
 from astromon.task import ReturnCode, run_tasks
@@ -140,7 +141,9 @@ class PeriscopeDriftData(StorableClass):
         )
         if exclude_regions:
             pos = SkyCoord(source["ra"] * u.deg, source["dec"] * u.deg)
-            result &= ~is_in_excluded_region(pos, source["obsid"], dbfile=EXCLUDED_SOURCES_FILE)
+            result &= ~is_in_excluded_region(
+                pos, source["obsid"], dbfile=EXCLUDED_SOURCES_FILE
+            )
         return result
 
     @staticmethod
@@ -580,8 +583,14 @@ def process_source(
             binned_data[col].format = fmt
 
     ## Summary
-    yag_vs_time = get_smoothing_spline(binned_data, "yag")
-    zag_vs_time = get_smoothing_spline(binned_data, "zag")
+    sel = (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data["yag"]))
+    yag_vs_time = get_smoothing_spline(
+        binned_data["rel_time_mean"][sel], binned_data["yag"][sel]
+    )
+    sel = (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data["zag"]))
+    zag_vs_time = get_smoothing_spline(
+        binned_data["rel_time_mean"][sel], binned_data["zag"][sel]
+    )
 
     cols = [
         "rel_time",
@@ -649,22 +658,19 @@ def process_source(
     )
 
 
-def get_smoothing_spline(binned_data, y_col):
-    dat = binned_data[
-        (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data[y_col]))
-    ]
-    if len(dat) == 0:
+def get_smoothing_spline(x, y):
+    if len(x) == 0:
         return BSpline([0, 1], [np.nan], k=0, extrapolate=True)
-    elif len(dat) == 1:
+    elif len(x) == 1:
         # this should never happen, but I do not want to deal with this error ever.
         # returning a constant spline
-        return BSpline([0, 1], dat[y_col], k=0, extrapolate=True)
-    elif len(dat) < 5:
+        return BSpline([0, 1], y, k=0, extrapolate=True)
+    elif len(x) < 5:
         # the smoothing spline call fails with too few points
         # will return a first degree spline that evaluates to a linear regression
-        regress = scipy.stats.linregress(dat["rel_time_mean"], dat[y_col])
-        tmin = dat["rel_time_mean"][0]
-        tmax = dat["rel_time_mean"][-1]
+        regress = scipy.stats.linregress(x, y)
+        tmin = x[0]
+        tmax = x[-1]
         return BSpline(
             [tmin - 1, tmin, tmax, tmax + 1],
             [
@@ -676,7 +682,7 @@ def get_smoothing_spline(binned_data, y_col):
         )
     # the value of lambda might seem arbitrary, but it can be estimated from cross-validation
     # this number is just close enough
-    return make_smoothing_spline(dat["rel_time_mean"], dat[y_col], lam=3e9)
+    return make_smoothing_spline(x, y, lam=3e9)
 
 
 def round_to_uncertainty(x, err):
@@ -1186,3 +1192,231 @@ def smooth(x, window_len=10, window="hanning"):
 
     y = np.convolve(w / w.sum(), s, mode="same")
     return y[window_len - 1 : -window_len + 1]
+
+
+def get_knots(time, min_n=200, min_t=2000):
+    # we generate a list of interval edges that each has at least min_n/4 points
+    n0 = int(len(time) // (min_n / 4))
+    edges = np.percentile(time, np.linspace(0, 100, n0 + 1))
+    idx_range = np.arange(len(edges))  # an integer array to refer to entries in edges
+
+    # we will ultimately select a subset of them to ensure each interval is at least min_t long
+    # and has at least min_n points. We start by selecting good intervals from the beginning
+    sel = np.zeros_like(edges, dtype=bool)
+    sel[0] = True
+
+    idx0 = 0
+    for idx in idx_range[1:]:
+        if edges[idx] - edges[idx0] > min_t and idx - idx0 >= 4:
+            # this closes one interval and starts the next
+            sel[idx] = True
+            idx0 = idx
+
+    indices = idx_range[sel]
+
+    if not sel[-1] and np.count_nonzero(sel) > 1:
+        # fix the trailing interval by splitting it over the previous ones
+        n_intervals = indices.shape[0] - 1  # the number of resulting long intervals
+        n_trail = (
+            idx_range[-1] - indices[-1] - 1
+        )  # the number of trailing short intervals
+        n, m = n_trail // n_intervals, n_trail % n_intervals
+        intervals = np.diff(edges[indices])
+        shortest = np.argsort(intervals)[: m + 1]
+        # increase all long intervals by n small intervals
+        shift = n * np.ones_like(indices[1:])
+        # and increase the smallest m long intervals by one short interval
+        shift[shortest] += 1
+        shift = np.cumsum(shift)
+        indices[1:] += shift
+        intervals = np.diff(edges[indices])
+
+    edges = edges[indices]
+
+    if len(edges) == 1:
+        # print("Only one edge found!")
+        edges = np.array([time[0], time[-1]])
+
+    # assert edges[0] == time[0]
+    # assert edges[-1] == time[-1]
+    # this is actually not guaranteed, because intervals can be slightly smaller than min_t
+    # assert np.all(np.diff(edges) >= min_t)
+
+    edges = np.pad(edges, (3, 3), mode="edge")
+    return edges
+
+
+class Likelihood:
+    def __init__(self, x, y, knots, box_size=4, alpha=0):
+        self.degree = 3
+        self.x = x
+        self.y = y
+        self.knots = knots
+        self.box_size = box_size
+        self.alpha = alpha
+        self.dm = BSpline.design_matrix(self.x, self.knots, self.degree)
+        self.n_points = self.dm.shape[1]
+        self.count = 0
+
+    def __call__(self, x):
+        self.count += 1
+        x0 = self.dm @ x[: self.n_points]
+        x1 = self.dm @ x[self.n_points : 2 * self.n_points]
+        sigma_1, sigma_2, rho, snr = x[2 * self.n_points :]
+
+        if sigma_1 <= 0 or sigma_2 <= 0 or snr < 0:
+            return np.inf
+        s = snr / (1 + snr)
+        b = 1 / (1 + snr)
+        # p = s * normal_prob_2d(
+        p = s * source_detection.normal_prob_2d(
+            self.y, x0, x1, sigma_1, sigma_2, rho
+        ) + b * source_detection.p_uniform(self.y, box_size=self.box_size)
+        res = -source_detection.nan_log(p).sum() + self.alpha * np.sum(
+            (x0 - self.y.T[0]) ** 2 + (x1 - self.y.T[1]) ** 2
+        )
+        return res
+
+
+def do_spline_fit(obs, source_id):
+    gaussian_sources = obs.get_sources(version="gaussian_detect", astromon_format=False)
+
+    box_size = 4
+    idx = np.argwhere(gaussian_sources["id"] == source_id).flatten()[0]
+    source = gaussian_sources[idx]
+    events = obs.periscope_drift.get_events()
+    events.rename_columns(["yag", "zag"], ["y_angle", "z_angle"])
+    events = events[
+        (np.abs(events["y_angle"] - source["y_angle"]) < box_size)
+        & (np.abs(events["z_angle"] - source["z_angle"]) < box_size)
+    ]
+
+    x0, x1, sigma_1, sigma_2, rho, snr = source["params"]
+
+    knot_list = get_knots(events["rel_time"].data)
+
+    likelihood = Likelihood(
+        x=events["rel_time"],
+        y=np.vstack([events["y_angle"], events["z_angle"]]).T,
+        knots=knot_list,
+        alpha=0,
+        # alpha=1e25
+    )
+
+    initial_guess = np.concatenate(
+        [
+            np.full(likelihood.n_points, x0),
+            np.full(likelihood.n_points, x1),
+            [sigma_1, sigma_2, rho, snr],
+        ]
+    )
+
+    bounds = []
+    bounds += likelihood.n_points * [(source["y_angle"] - 10, source["y_angle"] + 10)]
+    bounds += likelihood.n_points * [(source["z_angle"] - 10, source["z_angle"] + 10)]
+    bounds += [(0.1, 20)]
+    bounds += [(0.1, 20)]
+    bounds += [(-np.pi / 2, np.pi / 2)]
+    bounds += [(0.1, 1000)]
+
+    fit_result = scipy.optimize.minimize(
+        likelihood,
+        x0=initial_guess,
+        bounds=bounds,
+        options={
+            "maxfun": 50000,
+            # "ftol": 1e-5,
+            "ftol": 1e-6,
+        },
+    )
+
+    hess_inv = fit_result.hess_inv(np.eye(fit_result.x.shape[0]))
+    dx = np.sqrt(np.diagonal(hess_inv)) * 1e-4
+    H = compute_hessian(likelihood, fit_result.x, dx=dx)
+
+    ok = fit_result.success and check_hessian(
+        H, msg=f"OBSID={obs.obsid}, source_id={source_id} spline fit"
+    )
+
+    maxx = int(np.ceil(events["rel_time"].max()))
+    x = np.linspace(likelihood.x.min(), likelihood.x.max(), maxx)
+    dm = BSpline.design_matrix(x, likelihood.knots, likelihood.degree)
+    idx = np.argmax(dm.toarray(), axis=0)
+    spline_pos = x[idx]
+
+    result = {
+        "degree": likelihood.degree,
+        "knots": likelihood.knots,
+        "n_points": likelihood.n_points,  # the number of degrees of freedom per axis
+        "spline_pos": spline_pos,
+        "value": fit_result.fun,
+        "success": ok,
+        "message": fit_result.message,
+        "params": fit_result.x,
+        "params_err": [np.nan, np.nan, np.nan],
+        "hess_inverse": hess_inv,
+        "covariance": np.nan * np.ones(hess_inv.shape),
+        "spline_yag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
+        "spline_zag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
+        "yag_error": lambda x: np.nan * np.ones_like(x),
+        "zag_error": lambda x: np.nan * np.ones_like(x),
+        "smooth_spline_yag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
+        "smooth_spline_zag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
+    }
+
+    if ok:
+        spline_yag = BSpline(likelihood.knots, fit_result.x[: likelihood.n_points], 3)
+        spline_zag = BSpline(
+            likelihood.knots,
+            fit_result.x[likelihood.n_points : 2 * likelihood.n_points],
+            3,
+        )
+
+        smspl_yag = get_smoothing_spline(spline_pos, spline_yag(spline_pos))
+        smspl_zag = get_smoothing_spline(spline_pos, spline_zag(spline_pos))
+
+        covariance = scipy.linalg.inv(H)
+        n = (fit_result.x.shape[0] - 4) // 2
+        def yag_error(x, spline=spline_yag, cov=covariance[:n,:n]):
+            dm = spline.design_matrix(x, spline.t, likelihood.degree).toarray()
+            return np.sqrt(np.einsum("ij,jk,ik->i", dm, cov, dm))
+        def zag_error(x, spline=spline_zag, cov=covariance[n:2*n,n:2*n]):
+            dm = spline.design_matrix(x, spline.t, likelihood.degree).toarray()
+            return np.sqrt(np.einsum("ij,jk,ik->i", dm, cov, dm))
+
+        result.update(
+            {
+                "covariance": covariance,
+                "params_err": np.sqrt(np.diagonal(covariance)),
+                "spline_yag": spline_yag,
+                "spline_zag": spline_zag,
+                "yag_error": yag_error,
+                "zag_error": zag_error,
+                "smooth_spline_yag": smspl_yag,
+                "smooth_spline_zag": smspl_zag,
+            }
+        )
+
+    return result
+
+
+def check_hessian(H, msg=None):
+    if msg is None:
+        msg = "Hessian check"
+    ok = True
+    if np.any(np.isnan(H)) or np.any(np.isinf(H)):
+        logger.debug(f"{msg}: Hessian has Nan or inf entries")
+        ok = False
+    if scipy.linalg.det(H) == 0.0:
+        logger.debug(f"{msg}: singular hessian matrix")
+        ok = False
+    if not scipy.linalg.issymmetric(H):
+        logger.debug(f"{msg}: Hessian is not symmetric")
+        ok = False
+
+    if ok:
+        covariance = scipy.linalg.inv(H)
+        if np.any(np.diagonal(covariance) < 0):
+            logger.debug(f"{msg}: Covariance has negative diagonal values")
+            ok = False
+    return ok
