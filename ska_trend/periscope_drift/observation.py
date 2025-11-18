@@ -874,34 +874,9 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
         dx = np.sqrt(np.diagonal(hess_inv)) * 1e-4
         H = compute_hessian(fun, result.x, dx=dx)
 
-        ok = True
-        if np.any(np.isnan(H)) or np.any(np.isinf(H)):
-            logger.debug(
-                f"OBSID={obs.obsid}, {src_id=}:"
-                f"Hessian has Nan or inf entries ({xmin} < {bin_col} < {xmax})"
-            )
-            ok = False
-        if scipy.linalg.det(H) == 0.0:
-            logger.debug(
-                f"OBSID={obs.obsid}, {src_id=}:"
-                f"singular hessian matrix ({xmin} < {bin_col} < {xmax})"
-            )
-            ok = False
-        if not scipy.linalg.issymmetric(H):
-            logger.debug(
-                f"OBSID={obs.obsid}, {src_id=}:"
-                f"Hessian is not symmetric ({xmin} < {bin_col} < {xmax})"
-            )
-            ok = False
-
-        if ok:
-            covariance = scipy.linalg.inv(H)
-            if np.any(np.diagonal(covariance) < 0):
-                logger.debug(
-                    f"OBSID={obs.obsid}, {src_id=}:"
-                    f"Covariance has negative diagonal values ({xmin} < {bin_col} < {xmax})"
-                )
-                ok = False
+        ok = result.success and check_hessian(
+            H, msg=f"OBSID={obs.obsid}, source_id={src_id} ({xmin} < {bin_col} < {xmax})"
+        )
 
         bd = {
             "obsid": obs.obsid,
@@ -939,6 +914,7 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
             )
 
         if ok:
+            covariance = scipy.linalg.inv(H)
             bd.update(
                 {
                     target_col: result.x[0],
