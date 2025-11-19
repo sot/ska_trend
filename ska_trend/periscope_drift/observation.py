@@ -20,7 +20,7 @@ import scipy
 import scipy.interpolate
 import ska_numpy
 from astromon.db import is_in_excluded_region
-from astromon.stored_result import stored_result
+from astromon.stored_result import StorableClass, stored_result
 from astromon.task import ReturnCode, run_tasks
 from astropy import table
 from astropy import units as u
@@ -38,6 +38,11 @@ from ska_trend.periscope_drift.correction import (
 )
 
 logger = logging.getLogger("periscope_drift")
+
+
+ARCHIVE_DIR = (
+    Path(os.environ["SKA"]) / "data" / "periscope_drift_reports" / "xray_observations"
+)
 
 
 EXCLUDED_SOURCES_FILE = (
@@ -75,7 +80,7 @@ class ObservationData:
     expected_correction: dict[str, Any]
 
 
-class PeriscopeDriftData:
+class PeriscopeDriftData(StorableClass):
     def __init__(self, obs):
         """
         Class with methods related to periscope drift data.
@@ -86,18 +91,10 @@ class PeriscopeDriftData:
             Astromon Observation object.
         """
         self.obs = obs
-
-    @property
-    def storage(self):
-        # the stored_result decorator needs self.storage so things are stored in the right place
-        return self.obs.storage
-
-    @property
-    def cache_dir(self):
-        """
-        Cache location property used by the cache (it uses value from the observation).
-        """
-        return self.obs.cache_dir
+        super().__init__(
+            archive_dir=ARCHIVE_DIR,
+            subdir=Path(f"obs{int(obs.obsid) // 1000:02d}") / f"{obs.obsid}",
+        )
 
     def is_selected(self):
         obsid_info = self.obs.get_info()
