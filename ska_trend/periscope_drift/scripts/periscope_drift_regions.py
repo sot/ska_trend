@@ -15,6 +15,7 @@ def modified_parser(parser_function):
             db_file=SKA / "data" / "periscope_drift_reports" / "excluded_sources.h5"
         )
         return parser
+
     return get_parser
 
 
