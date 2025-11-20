@@ -83,7 +83,7 @@ class ObservationData:
 
 
 class PeriscopeDriftData(StorableClass):
-    def __init__(self, obs):
+    def __init__(self, obs, workdir=None, archive_dir=None):
         """
         Class with methods related to periscope drift data.
 
@@ -92,9 +92,12 @@ class PeriscopeDriftData(StorableClass):
         obs : Observation
             Astromon Observation object.
         """
+        if archive_dir is None:
+            archive_dir = ARCHIVE_DIR
         self.obs = obs
         super().__init__(
-            archive_dir=ARCHIVE_DIR,
+            archive_dir=archive_dir,
+            workdir=workdir,
             subdir=Path(f"obs{int(obs.obsid) // 1000:02d}") / f"{obs.obsid}",
         )
 
@@ -444,11 +447,6 @@ class PeriscopeDriftData(StorableClass):
         return fetch_telemetry(start, stop)
 
 
-class PeriscopeDriftDataProperty:
-    def __get__(self, obj, objtype_):
-        return PeriscopeDriftData(obj)
-
-
 class Observation(astromon.observation.Observation):
     """
     Observation class for processing periscope drift data.
@@ -456,10 +454,35 @@ class Observation(astromon.observation.Observation):
     This class is a subclass of astromon.observation.Observation.
     """
 
-    def __init__(self, obsid, workdir=None, archive_dir=None):
-        super().__init__(obsid, workdir=workdir, archive_dir=archive_dir)
+    def __init__(
+        self,
+        obsid,
+        workdir=None,
+        archive_dir=None,
+        astromon_workdir=None,
+        astromon_archive_dir=None,
+    ):
+        super().__init__(
+            obsid, workdir=astromon_workdir, archive_dir=astromon_archive_dir
+        )
 
-    periscope_drift = PeriscopeDriftDataProperty()
+        self.periscope_drift = PeriscopeDriftData(
+            self, workdir=workdir, archive_dir=archive_dir
+        )
+
+
+    def archive(self, *regex):
+        """
+        Move observation files to an archive location.
+
+        Parameters
+        ----------
+        regex: list of str
+            Optional. If not given, self.archive_regex is used.
+            Files matching any of the strings are arcived in a long-term location.
+        """
+        super().archive(*regex)
+        self.periscope_drift.archive(*regex)
 
 
 def process_source(
