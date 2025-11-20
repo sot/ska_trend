@@ -71,6 +71,7 @@ class SourceData:
     fits_1d: table.Table
     yag_vs_time: Any
     zag_vs_time: Any
+    spline_fit: dict[str, Any]
 
 
 @dataclass
@@ -582,6 +583,8 @@ def process_source(
         if col in binned_data.colnames:
             binned_data[col].format = fmt
 
+    spline_fit = do_spline_fit(obs, source)
+
     ## Summary
     sel = (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data["yag"]))
     yag_vs_time = get_smoothing_spline(
@@ -616,6 +619,7 @@ def process_source(
         "src_id": source["id"],
         "d_OOBAGRD3": source["d_OOBAGRD3"],
         "d_OOBAGRD6": source["d_OOBAGRD6"],
+        "spline_fit": spline_fit,
     }
     for col in cols:
         for y_col in y_cols:
@@ -875,7 +879,8 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
         H = compute_hessian(fun, result.x, dx=dx)
 
         ok = result.success and check_hessian(
-            H, msg=f"OBSID={obs.obsid}, source_id={src_id} ({xmin} < {bin_col} < {xmax})"
+            H,
+            msg=f"OBSID={obs.obsid}, source_id={src_id} ({xmin} < {bin_col} < {xmax})",
         )
 
         bd = {
@@ -1244,7 +1249,6 @@ class Likelihood:
             return np.inf
         s = snr / (1 + snr)
         b = 1 / (1 + snr)
-        # p = s * normal_prob_2d(
         p = s * source_detection.normal_prob_2d(
             self.y, x0, x1, sigma_1, sigma_2, rho
         ) + b * source_detection.p_uniform(self.y, box_size=self.box_size)
@@ -1252,6 +1256,20 @@ class Likelihood:
             (x0 - self.y.T[0]) ** 2 + (x1 - self.y.T[1]) ** 2
         )
         return res
+
+
+class SplineFitUncertainty:
+    def __init__(self, spline=None, covariance=None):
+        self.spline = spline
+        self.covariance = covariance
+
+    def __call__(self, x):
+        if self.spline is None or self.covariance is None:
+            return np.nan * np.ones_like(x)
+        dm = self.spline.design_matrix(x, self.spline.t, self.spline.k).toarray()
+        # np.sqrt(np.einsum("ij,jk,ik->i", dm, cov, dm)) is the same as
+        # np.sqrt((dm @ cov @ dm.T).diagonal()) but takes less memory
+        return np.sqrt(np.einsum("ij,jk,ik->i", dm, self.covariance, dm))
 
 
 def do_spline_fit(obs, source_id):
@@ -1301,8 +1319,7 @@ def do_spline_fit(obs, source_id):
         bounds=bounds,
         options={
             "maxfun": 50000,
-            # "ftol": 1e-5,
-            "ftol": 1e-6,
+            # "ftol": 1e-6,
         },
     )
 
@@ -1334,8 +1351,8 @@ def do_spline_fit(obs, source_id):
         "covariance": np.nan * np.ones(hess_inv.shape),
         "spline_yag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
         "spline_zag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
-        "yag_error": lambda x: np.nan * np.ones_like(x),
-        "zag_error": lambda x: np.nan * np.ones_like(x),
+        "yag_error": SplineFitUncertainty(),
+        "zag_error": SplineFitUncertainty(),
         "smooth_spline_yag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
         "smooth_spline_zag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
     }
@@ -1352,13 +1369,7 @@ def do_spline_fit(obs, source_id):
         smspl_zag = get_smoothing_spline(spline_pos, spline_zag(spline_pos))
 
         covariance = scipy.linalg.inv(H)
-        n = (fit_result.x.shape[0] - 4) // 2
-        def yag_error(x, spline=spline_yag, cov=covariance[:n,:n]):
-            dm = spline.design_matrix(x, spline.t, likelihood.degree).toarray()
-            return np.sqrt(np.einsum("ij,jk,ik->i", dm, cov, dm))
-        def zag_error(x, spline=spline_zag, cov=covariance[n:2*n,n:2*n]):
-            dm = spline.design_matrix(x, spline.t, likelihood.degree).toarray()
-            return np.sqrt(np.einsum("ij,jk,ik->i", dm, cov, dm))
+        n = likelihood.n_points
 
         result.update(
             {
@@ -1366,8 +1377,12 @@ def do_spline_fit(obs, source_id):
                 "params_err": np.sqrt(np.diagonal(covariance)),
                 "spline_yag": spline_yag,
                 "spline_zag": spline_zag,
-                "yag_error": yag_error,
-                "zag_error": zag_error,
+                "yag_error": SplineFitUncertainty(
+                    spline=spline_yag, covariance=covariance[:n, :n]
+                ),
+                "zag_error": SplineFitUncertainty(
+                    spline=spline_zag, covariance=covariance[n : 2 * n, n : 2 * n]
+                ),
                 "smooth_spline_yag": smspl_yag,
                 "smooth_spline_zag": smspl_zag,
             }
