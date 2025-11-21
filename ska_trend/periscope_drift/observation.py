@@ -469,7 +469,6 @@ class Observation(astromon.observation.Observation):
             self, workdir=workdir, archive_dir=archive_dir
         )
 
-
     def archive(self, *regex):
         """
         Move observation files to an archive location.
@@ -1298,7 +1297,9 @@ class SplineFitUncertainty:
 def do_spline_fit(obs, source):
     box_size = 4
     if np.issubdtype(type(source), np.integer):
-        gaussian_sources = obs.get_sources(version="gaussian_detect", astromon_format=False)
+        gaussian_sources = obs.get_sources(
+            version="gaussian_detect", astromon_format=False
+        )
         idx = np.argwhere(gaussian_sources["id"] == source).flatten()[0]
         source = gaussian_sources[idx]
     events = obs.periscope_drift.get_events()
