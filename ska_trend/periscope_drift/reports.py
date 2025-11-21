@@ -346,6 +346,7 @@ def write_report(
         selected = observation.PeriscopeDriftData.is_selected_source(
             report_sources, exclude_regions=True
         )
+        selected &= report_sources["n_points"] > 2
 
         report_sources = report_sources[selected]
     else:

@@ -141,7 +141,6 @@ class PeriscopeDriftData(StorableClass):
             PeriscopeDriftData.is_pre_selected_source(source)
             & (source["snr"] > 90)
             & (source["psfratio"] < 1.2)
-            & (source["n_points"] > 2)
         )
         if exclude_regions:
             pos = SkyCoord(source["ra"] * u.deg, source["dec"] * u.deg)
