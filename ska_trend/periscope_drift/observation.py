@@ -605,7 +605,7 @@ def process_source(
         if col in binned_data.colnames:
             binned_data[col].format = fmt
 
-    spline_fit = do_spline_fit(obs, source)
+    spline_fit = do_spline_fit(obs, source["id"])
 
     ## Summary
     sel = (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data["yag"]))
@@ -681,6 +681,7 @@ def process_source(
         fits_1d=line_fit,
         yag_vs_time=yag_vs_time,
         zag_vs_time=zag_vs_time,
+        spline_fit=spline_fit,
     )
 
 
@@ -1294,12 +1295,12 @@ class SplineFitUncertainty:
         return np.sqrt(np.einsum("ij,jk,ik->i", dm, self.covariance, dm))
 
 
-def do_spline_fit(obs, source_id):
-    gaussian_sources = obs.get_sources(version="gaussian_detect", astromon_format=False)
-
+def do_spline_fit(obs, source):
     box_size = 4
-    idx = np.argwhere(gaussian_sources["id"] == source_id).flatten()[0]
-    source = gaussian_sources[idx]
+    if np.issubdtype(type(source), np.integer):
+        gaussian_sources = obs.get_sources(version="gaussian_detect", astromon_format=False)
+        idx = np.argwhere(gaussian_sources["id"] == source).flatten()[0]
+        source = gaussian_sources[idx]
     events = obs.periscope_drift.get_events()
     events.rename_columns(["yag", "zag"], ["y_angle", "z_angle"])
     events = events[
@@ -1350,14 +1351,13 @@ def do_spline_fit(obs, source_id):
     H = compute_hessian(likelihood, fit_result.x, dx=dx)
 
     ok = fit_result.success and check_hessian(
-        H, msg=f"OBSID={obs.obsid}, source_id={source_id} spline fit"
+        H, msg=f"OBSID={obs.obsid}, source_id={source['id']} spline fit"
     )
 
     maxx = int(np.ceil(events["rel_time"].max()))
     x = np.linspace(likelihood.x.min(), likelihood.x.max(), maxx)
     dm = BSpline.design_matrix(x, likelihood.knots, likelihood.degree)
-    idx = np.argmax(dm.toarray(), axis=0)
-    spline_pos = x[idx]
+    spline_pos = x[np.argmax(dm.toarray(), axis=0)]
 
     result = {
         "degree": likelihood.degree,
