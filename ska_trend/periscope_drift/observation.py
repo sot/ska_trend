@@ -9,6 +9,7 @@ import functools
 import logging
 import os
 import warnings
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -94,7 +95,7 @@ class PeriscopeDriftData(StorableClass):
         """
         if archive_dir is None:
             archive_dir = ARCHIVE_DIR
-        self.obs = obs
+        self.obs = weakref.proxy(obs)
         super().__init__(
             archive_dir=archive_dir,
             workdir=workdir,
