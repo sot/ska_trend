@@ -136,9 +136,9 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
                 logger.debug(f"OBSID={obsid}           {step.line}")
         except Exception as exc:
             ok = False
-            msg = f"OBSID={obs.obsid} FAIL - skipped: {exc}"
+            msg = f"OBSID={obsid} FAIL - skipped: {exc}"
             exc_type, exc_value, exc_traceback = sys.exc_info()
-            logger.error(f"OBSID={obs.obsid} {exc_type}: {exc_value}")
+            logger.error(f"OBSID={obsid} {exc_type}: {exc_value}")
             trace = traceback.extract_tb(exc_traceback)
             for step in trace:
                 logger.error(
