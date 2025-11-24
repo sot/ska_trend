@@ -211,7 +211,7 @@ class PeriscopeDriftData(StorableClass):
             f"{events_file}[cols time,ra,dec,x,y]",
             outfile,
             clobber="yes",
-            logging_tag=str(self),
+            logging_tag=f"OBSID={self.obs.obsid}",
         )
         # calling as_array converts to native byteorder
         # (some tools like pandas and seaborn do not support big endian on little endian machines)
