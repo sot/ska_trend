@@ -294,6 +294,7 @@ def write_report(
     sources=None,
     report_observations=None,
     archive_dir=None,
+    astromon_archive_dir=None,
     workdir=None,
     overwrite=False,
     show_progress=False,
@@ -317,7 +318,10 @@ def write_report(
         (default), observations are created as needed.
     archive_dir : str or Path, optional
         Path to the archive directory. If None (default), the value of the
-        asreomon archive on $SKA/data is used.
+        periscope_drift archive on $SKA/data is used.
+    astromon_archive_dir : str or Path, optional
+        Path to the archive directory. If None (default), the value of the
+        astromon archive on $SKA/data is used.
     workdir : str or Path, optional
         Path to the work directory. If None (default), a temp directory is used.
     """
@@ -355,7 +359,11 @@ def write_report(
     if report_observations is None:
         report_observations = {
             str(obsid): observation.Observation(
-                obsid, workdir=workdir, archive_dir=archive_dir
+                obsid,
+                workdir=workdir,
+                archive_dir=archive_dir,
+                astromon_workdir=workdir,
+                astromon_archive_dir=astromon_archive_dir,
             )
             for obsid in np.unique(report_sources["obsid"])
         }
@@ -375,6 +383,7 @@ def write_report(
             "stop": stop,
             "output_dir": output_dir,
             "archive_dir": archive_dir,
+            "astromon_archive_dir": astromon_archive_dir,
             "workdir": workdir,
             "overwrite": False,
         }

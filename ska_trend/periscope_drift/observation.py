@@ -102,6 +102,21 @@ class PeriscopeDriftData(StorableClass):
             subdir=Path(f"obs{int(obs.obsid) // 1000:02d}") / f"{obs.obsid}",
         )
 
+    def archive(self, *regex):
+        """
+        Move observation files to an archive location.
+
+        Parameters
+        ----------
+        regex: list of str
+            Optional. If not given, self.archive_regex is used.
+            Files matching any of the strings are arcived in a long-term location.
+        """
+        if not regex:
+            regex = ["periscope_drift"]
+
+        super().archive(*regex)
+
     def is_selected(self):
         obsid_info = self.obs.get_info()
         return (
@@ -462,6 +477,9 @@ class Observation(astromon.observation.Observation):
         astromon_workdir=None,
         astromon_archive_dir=None,
     ):
+        if astromon_workdir is None:
+            astromon_workdir = workdir
+
         super().__init__(
             obsid, workdir=astromon_workdir, archive_dir=astromon_archive_dir
         )
@@ -469,19 +487,6 @@ class Observation(astromon.observation.Observation):
         self.periscope_drift = PeriscopeDriftData(
             self, workdir=workdir, archive_dir=archive_dir
         )
-
-    def archive(self, *regex):
-        """
-        Move observation files to an archive location.
-
-        Parameters
-        ----------
-        regex: list of str
-            Optional. If not given, self.archive_regex is used.
-            Files matching any of the strings are arcived in a long-term location.
-        """
-        super().archive(*regex)
-        self.periscope_drift.archive(*regex)
 
 
 def process_source(

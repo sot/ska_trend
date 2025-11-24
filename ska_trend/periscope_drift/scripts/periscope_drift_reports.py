@@ -36,8 +36,14 @@ def get_parser():
         help="Working directory (the default is a temporary directory)",
     )
     parser.add_argument(
-        "--archive-dir",
+        "--astromon-archive-dir",
         default=Path(os.environ["SKA"]) / "data" / "astromon" / "xray_observations",
+        type=Path,
+        help="Astromon archive directory",
+    )
+    parser.add_argument(
+        "--archive-dir",
+        default=Path(os.environ["SKA"]) / "data" / "periscope_drift" / "xray_observations",
         type=Path,
         help="Astromon archive directory",
     )
@@ -111,6 +117,7 @@ def main():
         start_process,
         stop,
         archive_dir=args.archive_dir,
+        astromon_archive_dir=args.astromon_archive_dir,
         workdir=args.workdir,
         log_level=args.log_level.upper(),
         show_progress=args.show_progress,
@@ -126,6 +133,7 @@ def main():
             stop=stop,
             output_dir=args.output,
             archive_dir=args.archive_dir,
+            astromon_archive_dir=args.astromon_archive_dir,
             workdir=args.workdir,
         )
 
