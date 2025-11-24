@@ -249,7 +249,7 @@ class PeriscopeDriftData(StorableClass):
                 events["OOBAGRD_pc1"] = np.nan
         return events
 
-    @stored_result("periscope_drift_sources", fmt="table", subdir="cache")
+    @stored_result("periscope_drift_sources", fmt="table", subdir="periscope_drift")
     def get_sources(self, apply_filter=True):
         src = self.obs.get_sources(version="gaussian_detect")
 
@@ -362,7 +362,7 @@ class PeriscopeDriftData(StorableClass):
 
         return src
 
-    @stored_result("expected_correction", fmt="pickle", subdir="cache")
+    @stored_result("expected_correction", fmt="pickle", subdir="periscope_drift")
     def get_expected_correction(self):
         obspar = self.obs.get_obspar()
         tstart = float(obspar["tstart"])
@@ -370,7 +370,7 @@ class PeriscopeDriftData(StorableClass):
         telem = fetch_telemetry(CxoTime(tstart), CxoTime(tstop))
         return _get_expected_correction(telem)
 
-    @stored_result("periscope_drift_summary", fmt="pickle", subdir="cache")
+    @stored_result("periscope_drift_summary", fmt="pickle", subdir="periscope_drift")
     def get_summary(self):
         obspar = self.obs.get_obspar()
         correction = self.get_expected_correction()
@@ -409,7 +409,7 @@ class PeriscopeDriftData(StorableClass):
         )
         return info
 
-    @stored_result("source_data", fmt="pickle", subdir="cache")
+    @stored_result("source_data", fmt="pickle", subdir="periscope_drift")
     def get_source_data(self):
         src = self.get_sources(apply_filter=False)
         selected = self.is_pre_selected_source(src)
