@@ -739,10 +739,10 @@ def _summarize_col_(binned_data_1d, fits_1d, col, y_col, bin_col="rel_time"):
     sigma_vals = binned_data[f"d_{y_col}"]
 
     ndf_0 = len(binned_data[y_col])
-    chi2_0 = np.sum(y_vals**2 / sigma_vals**2) / ndf_0
-    p_value_0 = scipy.stats.chi2.sf(chi2_0 * ndf_0, ndf_0)
 
-    if line_fit is not None and len(binned_data) > 0:
+    if line_fit is not None and ndf_0 > 0:
+        chi2_0 = np.sum(y_vals**2 / sigma_vals**2) / ndf_0
+        p_value_0 = scipy.stats.chi2.sf(chi2_0 * ndf_0, ndf_0)
         ndf = len(binned_data[y_col]) - 2
         params = line_fit["parameters"]
         cov = line_fit["covariance"]
@@ -764,6 +764,8 @@ def _summarize_col_(binned_data_1d, fits_1d, col, y_col, bin_col="rel_time"):
         ndf = 0
         slope = np.nan
         slope_err = np.nan
+        chi2_0 = np.nan
+        p_value_0 = np.nan
         chi2 = np.nan
         p_value = np.nan
         chi2_0_corr = np.nan
