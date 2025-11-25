@@ -982,15 +982,23 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
     line_fits = []
     for x_col in ["rel_time", "OOBAGRD3", "OOBAGRD6", "OOBAGRD_pc1"]:
         ok_rows = np.isfinite(t[target_col])
+        fit_ok = False
         if np.count_nonzero(ok_rows) > 2:
-            line_fit = scipy.optimize.curve_fit(
-                line,
-                t[ok_rows][f"{x_col}_mean"],
-                t[ok_rows][target_col],
-                sigma=t[ok_rows][f"d_{target_col}"],
-                p0=[0.0, np.mean(t[ok_rows][target_col])],
-                absolute_sigma=True,
-            )
+            with warnings.catch_warnings():
+                # ignoring this warning because we will check the result below
+                warnings.filterwarnings(
+                    "ignore", message="Covariance of the parameters could not be estimated"
+                )
+                line_fit = scipy.optimize.curve_fit(
+                    line,
+                    t[ok_rows][f"{x_col}_mean"],
+                    t[ok_rows][target_col],
+                    sigma=t[ok_rows][f"d_{target_col}"],
+                    p0=[0.0, np.mean(t[ok_rows][target_col])],
+                    absolute_sigma=True,
+                )
+            fit_ok = np.isfinite(line_fit[0]).all() and np.isfinite(line_fit[1]).all()
+        if fit_ok:
             line_fit = {
                 "bin_col": bin_col,
                 "x_col": x_col,
