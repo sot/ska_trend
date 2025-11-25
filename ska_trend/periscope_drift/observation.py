@@ -509,14 +509,6 @@ def process_source(
     matches["src_id"] = source["id"]
     matches["obsid"] = obs.obsid
 
-    # require at least 3 bins in each column
-    # if (
-    #     len(np.unique(matches[["OOBAGRD3"]])) < 3
-    #     or len(np.unique(matches[["OOBAGRD6"]])) < 3
-    # ):
-    #     logger.debug(f"Not enough points in OBSID {obs.obsid} source {source['id']}")
-    #     return {}
-
     fits = [
         fit(
             obs,
@@ -565,12 +557,6 @@ def process_source(
             "OOBAGRD_pc1_std",
         ]
     )
-    # this one might not be necessary
-    # fits += [
-    #     fit(obs, source["id"], matches, col, target_col, extra_cols=["OOBAGRD3", "OOBAGRD6"])
-    #     for col in ["OOBAGRD3", "OOBAGRD6"]
-    #     for target_col in ["yag", "zag"]
-    # ]
 
     binned_data = table.hstack([yag_fits, zag_fits], table_names=["yag", "zag"])
 
@@ -613,52 +599,31 @@ def process_source(
     spline_fit = do_spline_fit(obs, source["id"])
 
     ## Summary
-    sel = (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data["yag"]))
-    yag_vs_time = get_smoothing_spline(
-        binned_data["rel_time_mean"][sel], binned_data["yag"][sel]
-    )
-    sel = (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data["zag"]))
-    zag_vs_time = get_smoothing_spline(
-        binned_data["rel_time_mean"][sel], binned_data["zag"][sel]
-    )
-
-    cols = [
-        "rel_time",
-        "OOBAGRD3",
-        "OOBAGRD6",
-        "OOBAGRD_pc1",
-    ]
-    y_cols = [
-        "yag",
-        "zag",
-    ]
-
     x = np.linspace(matches["rel_time"].min(), matches["rel_time"].max(), 2000)
-    yag = yag_vs_time(x)
+    yag = spline_fit["smooth_spline_yag"](x)
     d_yag = np.max(yag) - np.min(yag)
 
-    zag = zag_vs_time(x)
+    zag = spline_fit["smooth_spline_zag"](x)
     d_zag = np.max(zag) - np.min(zag)
 
     d_r = np.max(np.sqrt((yag - np.min(yag)) ** 2 + (zag - np.min(zag)) ** 2))
 
     results = {
-        "src_id": source["id"],
-        "d_OOBAGRD3": source["d_OOBAGRD3"],
-        "d_OOBAGRD6": source["d_OOBAGRD6"],
-        "spline_fit": spline_fit,
+        **_summarize_col_(binned_data, line_fit, "OOBAGRD_pc1", "yag"),
+        **_summarize_col_(binned_data, line_fit, "OOBAGRD_pc1", "zag"),
     }
-    for col in cols:
-        for y_col in y_cols:
-            result = _summarize_col_(binned_data, line_fit, col, y_col)
-            results.update(result)
-
-    duration = np.max(matches["time"]) - np.min(matches["time"])
 
     r_corr = np.sqrt(correction["ang_y_corr"] ** 2 + correction["ang_y_corr"] ** 2)
-    results.update(
+
+    src_summary = dict(source)
+    src_summary.update(
         {
-            "duration": duration,
+            "src_id": source["id"],
+            "n_points": len(binned_data),
+            "tstart": obs.get_info()["tstart"],
+            "duration": np.max(matches["time"]) - np.min(matches["time"]),
+            "d_OOBAGRD3": source["d_OOBAGRD3"],
+            "d_OOBAGRD6": source["d_OOBAGRD6"],
             "drift_yag_actual": d_yag,
             "drift_zag_actual": d_zag,
             "drift_actual": d_r,
@@ -667,16 +632,23 @@ def process_source(
             - np.min(correction["ang_y_corr"]),
             "drift_zag_expected": np.max(correction["ang_z_corr"])
             - np.min(correction["ang_z_corr"]),
-            "drift_yag_fit": results["d_OOBAGRD3"] * results["OOBAGRD3_yag_slope"],
-            "drift_zag_fit": results["d_OOBAGRD6"] * results["OOBAGRD6_zag_slope"],
+            "OOBAGRD_corr_angle": correction["OOBAGRD_corr_angle"],
+            "OOBAGRD_pc1_yag_slope": results["OOBAGRD_pc1_yag_slope"],
+            "OOBAGRD_pc1_yag_slope_err": results["OOBAGRD_pc1_yag_slope_err"],
+            "OOBAGRD_pc1_zag_slope": results["OOBAGRD_pc1_zag_slope"],
+            "OOBAGRD_pc1_zag_slope_err": results["OOBAGRD_pc1_zag_slope_err"],
+            "OOBAGRD_pc1_yag_null_chi2_corr": results["OOBAGRD_pc1_yag_null_chi2_corr"],
+            "OOBAGRD_pc1_yag_ndf": results["OOBAGRD_pc1_yag_ndf"],
+            "OOBAGRD_pc1_zag_null_chi2_corr": results["OOBAGRD_pc1_zag_null_chi2_corr"],
+            "OOBAGRD_pc1_zag_ndf": results["OOBAGRD_pc1_zag_ndf"],
+            "OOBAGRD_pc1_yag_null_p_value_corr": results[
+                "OOBAGRD_pc1_yag_null_p_value_corr"
+            ],
+            "OOBAGRD_pc1_zag_null_p_value_corr": results[
+                "OOBAGRD_pc1_zag_null_p_value_corr"
+            ],
         }
     )
-
-    src_summary = dict(source)
-    src_summary["OOBAGRD_corr_angle"] = correction["OOBAGRD_corr_angle"]
-    src_summary["tstart"] = obs.get_info()["tstart"]
-    src_summary["n_points"] = len(binned_data)
-    src_summary.update(results)
 
     return SourceData(
         source=dict(source),
@@ -684,8 +656,8 @@ def process_source(
         events=matches,
         binned_data_1d=binned_data,
         fits_1d=line_fit,
-        yag_vs_time=yag_vs_time,
-        zag_vs_time=zag_vs_time,
+        yag_vs_time=spline_fit["smooth_spline_yag"],
+        zag_vs_time=spline_fit["smooth_spline_zag"],
         spline_fit=spline_fit,
     )
 
