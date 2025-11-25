@@ -238,7 +238,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
             "yag_slope": summary["OOBAGRD_pc1_yag_slope"],
             "yag_slope_err": summary["OOBAGRD_pc1_yag_slope_err"],
             "zag_slope": summary["OOBAGRD_pc1_zag_slope"],
-            "zag_slope_err": summary["OOBAGRD_pc1_yag_slope_err"],
+            "zag_slope_err": summary["OOBAGRD_pc1_zag_slope_err"],
             "yag_null_chi2": summary["OOBAGRD_pc1_yag_null_chi2_corr"],
             "yag_ndf": summary["OOBAGRD_pc1_yag_ndf"],
             "zag_null_chi2": summary["OOBAGRD_pc1_zag_null_chi2_corr"],

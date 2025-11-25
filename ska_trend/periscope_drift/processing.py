@@ -114,7 +114,7 @@ def process_observation(obsid, work_dir, archive_dir, astromon_archive_dir, log_
                 obsid,
                 workdir=work_dir,
                 archive_dir=archive_dir,
-                astromon_archive_dir=astromon_archive_dir
+                astromon_archive_dir=astromon_archive_dir,
             )
 
             if obs.is_selected:
