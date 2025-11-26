@@ -218,6 +218,8 @@ def run_multiprocess(
 
     with Pool(processes=n_threads) as pool:
         if show_progress:
+            # this is a print statement because that is where the tqdm progress bar goes
+            print("Processing observations...")
             results = []
             n_per_iter = n_per_iter if n_per_iter else 20 * n_threads
             for t_args in tqdm(split(task_args, n_per_iter)):
@@ -342,7 +344,8 @@ def process_obsids(
     observations = {}
     summary = []
     if show_progress:
-        logger.info("Summarizing observations")
+        # this is a print statement because that is where the tqdm progress bar goes
+        print("Summarizing observations...")
     obsid_iter = tqdm(obsids) if show_progress else obsids
     for obsid in obsid_iter:
         obs = observation.Observation(

@@ -170,6 +170,9 @@ def write_html_report(
 
     # the sources
     source_files = []
+    if show_progress:
+        # this is a print statement because that is where the tqdm progress bar goes
+        print("Writing source reports...")
     src_iter = tqdm(sources["obsid", "id"]) if show_progress else sources["obsid", "id"]
     for obsid, src_id in src_iter:
         obs = observations[str(obsid)]

@@ -138,6 +138,7 @@ def main():
             archive_dir=args.archive_dir,
             astromon_archive_dir=args.astromon_archive_dir,
             workdir=args.workdir,
+            show_progress=args.show_progress,
         )
 
         with open(args.output / "errors.json", "w") as fh:
