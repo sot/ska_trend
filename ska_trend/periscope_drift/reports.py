@@ -174,15 +174,15 @@ def write_html_report(
     for obsid, src_id in src_iter:
         obs = observations[str(obsid)]
         src_file = (
-            Path("sources")
+            outdir
+            / "sources"
             / f"{float(obsid) // 1e3:02.0f}"
             / f"{obsid}"
             / str(src_id)
             / "index.html"
         )
-        src_file.parent.mkdir(exist_ok=True, parents=True)
-        write_source_html_report(obs, src_id, outdir / src_file, overwrite=overwrite)
-        source_files.append(str(src_file))
+        write_source_html_report(obs, src_id, src_file, overwrite=overwrite)
+        source_files.append(str(src_file.relative_to(outdir)))
 
     sources["filename"] = source_files
 
