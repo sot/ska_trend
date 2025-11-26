@@ -987,7 +987,8 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
             with warnings.catch_warnings():
                 # ignoring this warning because we will check the result below
                 warnings.filterwarnings(
-                    "ignore", message="Covariance of the parameters could not be estimated"
+                    "ignore",
+                    message="Covariance of the parameters could not be estimated",
                 )
                 line_fit = scipy.optimize.curve_fit(
                     line,
