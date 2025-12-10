@@ -10,22 +10,21 @@ are properly linked.
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
 class ObservationInfo:
     """Container for observation information from info.json files."""
-
-    def __init__(self, obsid: int, source: str, date_starcat: str,
-                 info_path: Path, obs_links: Dict):
-        self.obsid = obsid
-        self.source = source
-        self.date_starcat = date_starcat
-        self.info_path = info_path
-        self.obs_links = obs_links
+    obsid: int
+    source: str
+    date_starcat: str
+    info_path: Path
+    obs_links: Dict
 
     def __str__(self):
         return f"ObsID {self.obsid} ({self.source}) at {self.date_starcat}"
