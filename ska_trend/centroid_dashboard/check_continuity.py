@@ -8,6 +8,7 @@ chain backwards from the most recent observation to ensure all observations
 are properly linked.
 """
 
+import argparse
 import json
 import sys
 from dataclasses import dataclass, field
@@ -17,6 +18,22 @@ from typing import Dict, List, Optional, Tuple
 from ska_helpers.logging import basic_logger
 
 logger = basic_logger("check_continuity")
+
+
+def get_opt():
+    """Get command line options."""
+    parser = argparse.ArgumentParser(
+        description="Check continuity of centroid dashboard observation chains"
+    )
+    parser.add_argument(
+        "--data-root",
+        default="reports",
+        help="Root directory for data files (default=reports)",
+    )
+    parser.add_argument(
+        "--log-level", default="INFO", help="Logging level (default=INFO)"
+    )
+    return parser
 
 
 @dataclass
@@ -229,7 +246,12 @@ class ContinuityChecker:
 
 def main():
     """Main entry point for continuity checker."""
-    checker = ContinuityChecker(Path("reports"))
+    parser = get_opt()
+    opt = parser.parse_args()
+
+    logger.setLevel(opt.log_level)
+
+    checker = ContinuityChecker(Path(opt.data_root))
     success = checker.run_check()
 
     if not success:
