@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ObservationInfo:
     """Container for observation information from info.json files."""
+
     obsid: int
     source: str
     date_starcat: str
@@ -37,6 +38,7 @@ class ObservationInfo:
 @dataclass
 class ContinuityChecker:
     """Check continuity of observation chains in centroid dashboard reports."""
+
     reports_root: Path
     observations: List[ObservationInfo] = field(default_factory=list)
     obs_by_key: Dict[Tuple[int, str], ObservationInfo] = field(default_factory=dict)
@@ -86,7 +88,7 @@ class ContinuityChecker:
                             source=info_data["source"],
                             date_starcat=info_data["date_starcat"],
                             info_path=info_json_path,
-                            obs_links=info_data["obs_links"]
+                            obs_links=info_data["obs_links"],
                         )
 
                         self.observations.append(obs_info)
@@ -96,7 +98,9 @@ class ContinuityChecker:
                         logger.warning(f"Error reading {info_json_path}: {e}")
                         continue
 
-        logger.info(f"Collected {len(self.observations)} observations from 4-digit years")
+        logger.info(
+            f"Collected {len(self.observations)} observations from 4-digit years"
+        )
 
     def sort_observations_by_date(self) -> None:
         """Sort observations by date_starcat timestamp."""
@@ -124,7 +128,10 @@ class ContinuityChecker:
             # Check for cycles
             obs_key = (current_obs.obsid, current_obs.source)
             if obs_key in visited_keys:
-                return False, f"Cycle detected at obsid {current_obs.obsid} (source {current_obs.source})"
+                return (
+                    False,
+                    f"Cycle detected at obsid {current_obs.obsid} (source {current_obs.source})",
+                )
 
             visited_keys.add(obs_key)
             chain_count += 1
@@ -152,23 +159,37 @@ class ContinuityChecker:
                             break
 
                 if found_dir:
-                    return False, (f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) links to "
-                                  f"incomplete obsid {prev_obsid} (source {prev_source}) - directory exists but no info.json")
+                    return False, (
+                        f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) "
+                        f"links to incomplete obsid {prev_obsid} (source {prev_source}) - "
+                        f"directory exists but no info.json"
+                    )
                 else:
-                    return False, (f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) links to "
-                                  f"missing obsid {prev_obsid} (source {prev_source}) - directory does not exist")
+                    return False, (
+                        f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) "
+                        f"links to missing obsid {prev_obsid} (source {prev_source}) - "
+                        f"directory does not exist"
+                    )
 
             current_obs = self.obs_by_key[prev_key]
 
         # Check if all observations were visited
         if len(visited_keys) != len(self.observations):
             missing_count = len(self.observations) - len(visited_keys)
-            missing_examples = [(obs.obsid, obs.source) for obs in self.observations
-                              if (obs.obsid, obs.source) not in visited_keys][:5]  # Show first 5
-            return False, (f"Incomplete chain: {missing_count} observations not "
-                          f"reachable from most recent. Examples: {missing_examples}")
+            missing_examples = [
+                (obs.obsid, obs.source)
+                for obs in self.observations
+                if (obs.obsid, obs.source) not in visited_keys
+            ][:5]  # Show first 5
+            return False, (
+                f"Incomplete chain: {missing_count} observations not "
+                f"reachable from most recent. Examples: {missing_examples}"
+            )
 
-        logger.info(f"Chain complete: visited {chain_count} observations out of {len(self.observations)} total")
+        logger.info(
+            f"Chain complete: visited {chain_count} observations out of "
+            f"{len(self.observations)} total"
+        )
         return True, None
 
     def run_check(self) -> bool:
@@ -191,10 +212,16 @@ class ContinuityChecker:
 
         if is_continuous:
             logger.info("✓ Observation chain continuity check PASSED")
-            logger.info(f"Summary: {len(self.observations)} observations from 4-digit years, all properly linked")
+            logger.info(
+                f"Summary: {len(self.observations)} observations from 4-digit years, "
+                f"all properly linked"
+            )
         else:
             logger.error(f"✗ Observation chain continuity check FAILED: {error_msg}")
-            logger.info(f"Summary: {len(self.observations)} observations from 4-digit years, broken chain detected")
+            logger.info(
+                f"Summary: {len(self.observations)} observations from 4-digit years, "
+                f"broken chain detected"
+            )
 
         return is_continuous
 
@@ -202,8 +229,7 @@ class ContinuityChecker:
 def main():
     """Main entry point for continuity checker."""
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s"
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
     checker = ContinuityChecker(Path("reports"))
