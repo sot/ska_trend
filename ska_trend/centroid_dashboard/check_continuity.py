@@ -9,13 +9,14 @@ are properly linked.
 """
 
 import json
-import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+from ska_helpers.logging import basic_logger
+
+logger = basic_logger("check_continuity")
 
 
 @dataclass
@@ -228,10 +229,6 @@ class ContinuityChecker:
 
 def main():
     """Main entry point for continuity checker."""
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-
     checker = ContinuityChecker(Path("reports"))
     success = checker.run_check()
 
