@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""
+Check continuity of centroid dashboard observation chains.
+
+This module validates the prev/next linking structure in the centroid dashboard
+reports by collecting all observations, ordering them by date, and walking the
+chain backwards from the most recent observation to ensure all observations
+are properly linked.
+"""
+
+import json
+import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from cxotime import CxoTime
+
+logger = logging.getLogger(__name__)
+
+
+class ObservationInfo:
+    """Container for observation information from info.json files."""
+
+    def __init__(self, obsid: int, source: str, date_starcat: str,
+                 info_path: Path, obs_links: Dict):
+        self.obsid = obsid
+        self.source = source
+        self.date_starcat = CxoTime(date_starcat)
+        self.info_path = info_path
+        self.obs_links = obs_links
+
+    def __str__(self):
+        return f"ObsID {self.obsid} ({self.source}) at {self.date_starcat.date}"
+
+    def __repr__(self):
+        return f"ObservationInfo(obsid={self.obsid}, source='{self.source}')"
+
+
+class ContinuityChecker:
+    """Check continuity of observation chains in centroid dashboard reports."""
+
+    def __init__(self, reports_root: Path = Path("reports")):
+        self.reports_root = Path(reports_root)
+        self.observations: List[ObservationInfo] = []
+        self.obs_by_key: Dict[Tuple[int, str], ObservationInfo] = {}
+
+    def collect_observations_2025(self) -> None:
+        """Collect all observations from 2025 reports directory."""
+        year_dir = self.reports_root / "2025"
+        if not year_dir.exists():
+            logger.error(f"Reports directory not found: {year_dir}")
+            return
+
+        logger.info(f"Scanning observations in {year_dir}")
+
+        for source_dir in sorted(year_dir.iterdir()):
+            if not source_dir.is_dir():
+                continue
+
+            logger.info(f"Checking {source_dir.name}")
+
+            for obsid_dir in source_dir.iterdir():
+                if not obsid_dir.is_dir():
+                    continue
+
+                info_json_path = obsid_dir / "info.json"
+                if not info_json_path.exists():
+                    logger.debug(f"No info.json found in {obsid_dir}")
+                    continue
+
+                try:
+                    with open(info_json_path) as f:
+                        info_data = json.load(f)
+
+                    obs_info = ObservationInfo(
+                        obsid=info_data["obsid"],
+                        source=info_data["source"],
+                        date_starcat=info_data["date_starcat"],
+                        info_path=info_json_path,
+                        obs_links=info_data["obs_links"]
+                    )
+
+                    self.observations.append(obs_info)
+                    self.obs_by_key[(obs_info.obsid, obs_info.source)] = obs_info
+
+                except (KeyError, json.JSONDecodeError, ValueError) as e:
+                    logger.warning(f"Error reading {info_json_path}: {e}")
+                    continue
+
+        logger.info(f"Collected {len(self.observations)} observations")
+
+    def sort_observations_by_date(self) -> None:
+        """Sort observations by date_starcat timestamp."""
+        self.observations.sort(key=lambda obs: obs.date_starcat.secs)
+        logger.info("Sorted observations by date")
+
+    def check_continuity(self) -> Tuple[bool, Optional[str]]:
+        """
+        Check continuity by walking backward from most recent observation.
+
+        Returns:
+            Tuple of (is_continuous, error_message)
+        """
+        if not self.observations:
+            return False, "No observations found"
+
+        # Start from the most recent observation
+        current_obs = self.observations[-1]
+        visited_keys = set()
+        chain_count = 0
+
+        logger.info(f"Starting continuity check from most recent: {current_obs}")
+
+        while current_obs is not None:
+            # Check for cycles
+            obs_key = (current_obs.obsid, current_obs.source)
+            if obs_key in visited_keys:
+                return False, f"Cycle detected at obsid {current_obs.obsid} (source {current_obs.source})"
+
+            visited_keys.add(obs_key)
+            chain_count += 1
+
+            # Get previous observation from links
+            prev_link = current_obs.obs_links.get("prev")
+            if prev_link is None:
+                # Reached the beginning of the chain
+                logger.info(f"Reached chain start at {current_obs}")
+                break
+
+            prev_obsid = prev_link["obsid"]
+            prev_source = prev_link["source"]
+            prev_key = (prev_obsid, prev_source)
+
+            # Check if previous observation exists
+            if prev_key not in self.obs_by_key:
+                # Check if the obsid directory exists but lacks info.json
+                prev_dir = self.reports_root / "2025" / prev_source / str(prev_obsid)
+                if prev_dir.exists():
+                    return False, (f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) links to "
+                                  f"incomplete obsid {prev_obsid} (source {prev_source}) - directory exists but no info.json")
+                else:
+                    return False, (f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) links to "
+                                  f"missing obsid {prev_obsid} (source {prev_source}) - directory does not exist")
+
+            current_obs = self.obs_by_key[prev_key]
+
+        # Check if all observations were visited
+        if len(visited_keys) != len(self.observations):
+            missing_count = len(self.observations) - len(visited_keys)
+            missing_examples = [(obs.obsid, obs.source) for obs in self.observations
+                              if (obs.obsid, obs.source) not in visited_keys][:5]  # Show first 5
+            return False, (f"Incomplete chain: {missing_count} observations not "
+                          f"reachable from most recent. Examples: {missing_examples}")
+
+        logger.info(f"Chain complete: visited {chain_count} observations out of {len(self.observations)} total")
+        return True, None
+
+    def run_check(self) -> bool:
+        """
+        Run the complete continuity check.
+
+        Returns:
+            True if continuity is good, False if broken
+        """
+        logger.info("Starting centroid dashboard continuity check")
+
+        self.collect_observations_2025()
+        if not self.observations:
+            logger.error("No observations found to check")
+            return False
+
+        self.sort_observations_by_date()
+
+        is_continuous, error_msg = self.check_continuity()
+
+        if is_continuous:
+            logger.info("✓ Observation chain continuity check PASSED")
+            logger.info(f"Summary: {len(self.observations)} observations from 2025, all properly linked")
+        else:
+            logger.error(f"✗ Observation chain continuity check FAILED: {error_msg}")
+            logger.info(f"Summary: {len(self.observations)} observations from 2025, broken chain detected")
+
+        return is_continuous
+
+
+def main():
+    """Main entry point for continuity checker."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
+    checker = ContinuityChecker()
+    success = checker.run_check()
+
+    if not success:
+        exit(1)
+
+
+if __name__ == "__main__":
+    main()
