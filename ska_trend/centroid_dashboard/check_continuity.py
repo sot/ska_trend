@@ -13,8 +13,6 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from cxotime import CxoTime
-
 logger = logging.getLogger(__name__)
 
 
@@ -25,12 +23,12 @@ class ObservationInfo:
                  info_path: Path, obs_links: Dict):
         self.obsid = obsid
         self.source = source
-        self.date_starcat = CxoTime(date_starcat)
+        self.date_starcat = date_starcat
         self.info_path = info_path
         self.obs_links = obs_links
 
     def __str__(self):
-        return f"ObsID {self.obsid} ({self.source}) at {self.date_starcat.date}"
+        return f"ObsID {self.obsid} ({self.source}) at {self.date_starcat}"
 
     def __repr__(self):
         return f"ObservationInfo(obsid={self.obsid}, source='{self.source}')"
@@ -103,7 +101,7 @@ class ContinuityChecker:
 
     def sort_observations_by_date(self) -> None:
         """Sort observations by date_starcat timestamp."""
-        self.observations.sort(key=lambda obs: obs.date_starcat.secs)
+        self.observations.sort(key=lambda obs: obs.date_starcat)
         logger.info("Sorted observations by date")
 
     def check_continuity(self) -> Tuple[bool, Optional[str]]:
