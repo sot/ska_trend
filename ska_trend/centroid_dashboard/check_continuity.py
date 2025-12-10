@@ -44,50 +44,62 @@ class ContinuityChecker:
         self.observations: List[ObservationInfo] = []
         self.obs_by_key: Dict[Tuple[int, str], ObservationInfo] = {}
 
-    def collect_observations_2025(self) -> None:
-        """Collect all observations from 2025 reports directory."""
-        year_dir = self.reports_root / "2025"
-        if not year_dir.exists():
-            logger.error(f"Reports directory not found: {year_dir}")
+    def collect_observations(self) -> None:
+        """Collect all observations from all years in reports directory."""
+        if not self.reports_root.exists():
+            logger.error(f"Reports directory not found: {self.reports_root}")
             return
 
-        logger.info(f"Scanning observations in {year_dir}")
-
-        for source_dir in sorted(year_dir.iterdir()):
-            if not source_dir.is_dir():
+        logger.info(f"Scanning observations in {self.reports_root}")
+        
+        # Process 4-digit year directories only
+        for year_dir in sorted(self.reports_root.iterdir()):
+            if not year_dir.is_dir():
                 continue
+                
+            # Skip non-year directories - only process 4-digit years
+            year_name = year_dir.name
+            if not (year_name.isdigit() and len(year_name) == 4):
+                logger.debug(f"Skipping non-4-digit-year directory: {year_name}")
+                continue
+                
+            logger.info(f"Processing year {year_name}")
 
-            logger.info(f"Checking {source_dir.name}")
-
-            for obsid_dir in source_dir.iterdir():
-                if not obsid_dir.is_dir():
+            for source_dir in sorted(year_dir.iterdir()):
+                if not source_dir.is_dir():
                     continue
 
-                info_json_path = obsid_dir / "info.json"
-                if not info_json_path.exists():
-                    logger.debug(f"No info.json found in {obsid_dir}")
-                    continue
+                logger.info(f"Checking {source_dir.name}")
 
-                try:
-                    with open(info_json_path) as f:
-                        info_data = json.load(f)
+                for obsid_dir in source_dir.iterdir():
+                    if not obsid_dir.is_dir():
+                        continue
 
-                    obs_info = ObservationInfo(
-                        obsid=info_data["obsid"],
-                        source=info_data["source"],
-                        date_starcat=info_data["date_starcat"],
-                        info_path=info_json_path,
-                        obs_links=info_data["obs_links"]
-                    )
+                    info_json_path = obsid_dir / "info.json"
+                    if not info_json_path.exists():
+                        logger.debug(f"No info.json found in {obsid_dir}")
+                        continue
 
-                    self.observations.append(obs_info)
-                    self.obs_by_key[(obs_info.obsid, obs_info.source)] = obs_info
+                    try:
+                        with open(info_json_path) as f:
+                            info_data = json.load(f)
 
-                except (KeyError, json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f"Error reading {info_json_path}: {e}")
-                    continue
+                        obs_info = ObservationInfo(
+                            obsid=info_data["obsid"],
+                            source=info_data["source"],
+                            date_starcat=info_data["date_starcat"],
+                            info_path=info_json_path,
+                            obs_links=info_data["obs_links"]
+                        )
 
-        logger.info(f"Collected {len(self.observations)} observations")
+                        self.observations.append(obs_info)
+                        self.obs_by_key[(obs_info.obsid, obs_info.source)] = obs_info
+
+                    except (KeyError, json.JSONDecodeError, ValueError) as e:
+                        logger.warning(f"Error reading {info_json_path}: {e}")
+                        continue
+
+        logger.info(f"Collected {len(self.observations)} observations from 4-digit years")
 
     def sort_observations_by_date(self) -> None:
         """Sort observations by date_starcat timestamp."""
@@ -133,9 +145,16 @@ class ContinuityChecker:
 
             # Check if previous observation exists
             if prev_key not in self.obs_by_key:
-                # Check if the obsid directory exists but lacks info.json
-                prev_dir = self.reports_root / "2025" / prev_source / str(prev_obsid)
-                if prev_dir.exists():
+                # Check if the obsid directory exists but lacks info.json in any year
+                found_dir = None
+                for year_dir in self.reports_root.iterdir():
+                    if year_dir.is_dir() and year_dir.name.isdigit():
+                        potential_dir = year_dir / prev_source / str(prev_obsid)
+                        if potential_dir.exists():
+                            found_dir = potential_dir
+                            break
+                            
+                if found_dir:
                     return False, (f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) links to "
                                   f"incomplete obsid {prev_obsid} (source {prev_source}) - directory exists but no info.json")
                 else:
@@ -164,7 +183,7 @@ class ContinuityChecker:
         """
         logger.info("Starting centroid dashboard continuity check")
 
-        self.collect_observations_2025()
+        self.collect_observations()
         if not self.observations:
             logger.error("No observations found to check")
             return False
@@ -175,10 +194,10 @@ class ContinuityChecker:
 
         if is_continuous:
             logger.info("✓ Observation chain continuity check PASSED")
-            logger.info(f"Summary: {len(self.observations)} observations from 2025, all properly linked")
+            logger.info(f"Summary: {len(self.observations)} observations from 4-digit years, all properly linked")
         else:
             logger.error(f"✗ Observation chain continuity check FAILED: {error_msg}")
-            logger.info(f"Summary: {len(self.observations)} observations from 2025, broken chain detected")
+            logger.info(f"Summary: {len(self.observations)} observations from 4-digit years, broken chain detected")
 
         return is_continuous
 
