@@ -51,18 +51,18 @@ class ContinuityChecker:
             return
 
         logger.info(f"Scanning observations in {self.reports_root}")
-        
+
         # Process 4-digit year directories only
         for year_dir in sorted(self.reports_root.iterdir()):
             if not year_dir.is_dir():
                 continue
-                
+
             # Skip non-year directories - only process 4-digit years
             year_name = year_dir.name
             if not (year_name.isdigit() and len(year_name) == 4):
                 logger.debug(f"Skipping non-4-digit-year directory: {year_name}")
                 continue
-                
+
             logger.info(f"Processing year {year_name}")
 
             for source_dir in sorted(year_dir.iterdir()):
@@ -153,7 +153,7 @@ class ContinuityChecker:
                         if potential_dir.exists():
                             found_dir = potential_dir
                             break
-                            
+
                 if found_dir:
                     return False, (f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) links to "
                                   f"incomplete obsid {prev_obsid} (source {prev_source}) - directory exists but no info.json")
