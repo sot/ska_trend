@@ -10,7 +10,8 @@ are properly linked.
 
 import json
 import logging
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -33,13 +34,12 @@ class ObservationInfo:
         return f"ObservationInfo(obsid={self.obsid}, source='{self.source}')"
 
 
+@dataclass
 class ContinuityChecker:
     """Check continuity of observation chains in centroid dashboard reports."""
-
-    def __init__(self, reports_root: Path = Path("reports")):
-        self.reports_root = Path(reports_root)
-        self.observations: List[ObservationInfo] = []
-        self.obs_by_key: Dict[Tuple[int, str], ObservationInfo] = {}
+    reports_root: Path
+    observations: List[ObservationInfo] = field(default_factory=list)
+    obs_by_key: Dict[Tuple[int, str], ObservationInfo] = field(default_factory=dict)
 
     def collect_observations(self) -> None:
         """Collect all observations from all years in reports directory."""
@@ -206,11 +206,11 @@ def main():
         format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    checker = ContinuityChecker()
+    checker = ContinuityChecker(Path("reports"))
     success = checker.run_check()
 
     if not success:
-        exit(1)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
