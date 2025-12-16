@@ -126,11 +126,15 @@
         </h2>
         <div id="collapseExclude" class="accordion-collapse collapse" aria-labelledby="headingExclude" data-bs-parent="#accordionExclude">
           <div class="accordion-body">
-            <p> Login as aca and execute the following command: </p>
+            <p> Login as aca and execute the following command(s). If this region should be excluded for all OBSIDs, remove the --obsid flag. Feel free to modify the comment. </p>
+            <p> to exclude from astromon: </p>
             <p> <div id="astromon_command"> <pre>
               astromon-excluded-region add --obsid {{ source.obsid }} --ra {{ source.ra }} --dec {{ source.dec }} --radius 10 --comment "Excluded after inspection";
             </pre></div> </p>
-            <p> If this region should be excluded for all OBSIDs, remove the --obsid flag. Feel free to modify the comment. </p>
+            <p> to exclude from periscope drift: </p>
+            <p> <div id="periscope_drift_command"> <pre>
+              ska_trend_periscope_drift_regions add --obsid {{ source.obsid }} --ra {{ source.ra }} --dec {{ source.dec }} --radius 10 --comment "Excluded after inspection";
+            </pre></div> </p>
           </div>
         </div>
       </div>
@@ -200,6 +204,14 @@
     const element = document.getElementById('astromon_command');
     element.addEventListener('click', () => {
       const htmlContent = element.childNodes[1].innerHTML
+      navigator.clipboard.writeText(htmlContent);
+    });
+  </script>
+
+  <script>
+    const pd_element = document.getElementById('periscope_drift_command');
+    pd_element.addEventListener('click', () => {
+      const htmlContent = pd_element.childNodes[1].innerHTML
       navigator.clipboard.writeText(htmlContent);
     });
   </script>
