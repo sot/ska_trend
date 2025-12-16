@@ -244,7 +244,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     try:
         abstract = get_proposal_abstract(obs.obsid)
     except Exception as exc:
-        if str(exc).startswith("got error 404"):
+        if str(exc).startswith("got error 404") or str(exc).startswith("got error 503"):
             abstract = ""
         else:
             raise
@@ -257,7 +257,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     page = template.render(
         source=src_pdd.source,
         metrics=metrics,
-        source_figure=source.to_html(config={"displayModeBar": False}, **kwargs),
+        source_figure=source.to_html(**kwargs),
         scatter_plot=plots.get_scatter_plot_figure(src_pdd).to_html(**kwargs),
         scatter_vs_gradients=plots.get_scatter_versus_gradients_figure(src_pdd).to_html(
             **kwargs

@@ -36,12 +36,27 @@
     
     <div class="container">
       <div class="row">
+        <div class="col-3">
+          <div>
+            {{source_figure}}
+          </div>
+        </div>
+        <div class="col-9">
+          <div class="ratio">
+            {{scatter_plot}}
+          </div>
+        </div>
+      </div>
+      <div class="row">
         <div class="col">
           <!-- <span class="align-baseline"> -->
           <div class="d-flex align-items-center">
-            <table class="table">
+            <table class="table table-sm">
               <tr>
                 <th scope="row"> OBSID </th> <td>{{ source.obsid }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> Date </th> <td>{{ ocat.ocat.start_date }} </td>
               </tr>
               <tr>
                 <th scope="row"> ID </th> <td>{{ source.id }} </td>
@@ -55,6 +70,14 @@
               <tr>
                 <th scope="row"> zag (arcsec) </th> <td>{{ '{:.2f}'.format(source.z_angle) }} </td>
               </tr>
+            </table>
+          </div>
+          <!-- </span> -->
+        </div>
+        <div class="col">
+          <!-- <span class="align-baseline"> -->
+          <div class="d-flex align-items-center">
+            <table class="table table-sm">
               <tr>
                 <th scope="row"> N </th> <td>{{ source.net_counts }} </td>
               </tr>
@@ -75,7 +98,7 @@
           <!-- </span> -->
         </div>
         <div class="col">
-          <table class="table">
+          <table class="table table-sm">
             <tr>
               <th scope="row">  </th>
               <th scope="row">  </th>
@@ -108,11 +131,6 @@
               <td> {{ "{:.1f}".format(metrics.drift_residual_zag) }}</td>
             </tr>
           </table>
-        </div>
-        <div class="col">
-          <div>
-            {{source_figure}}
-          </div>
         </div>
       </div>
     </div>
@@ -156,11 +174,6 @@
       </div>
     </div>
 
-    <h2> Time Evolution </h2>
-    <!-- <div class="ratio ratio-21x9"> -->
-      <div class="ratio" style="--bs-aspect-ratio: 50%;">
-        {{scatter_plot}}
-      </div>
       
     <h2> Telemetry </h2>
     <div class="ratio" style="--bs-aspect-ratio: 40%;">

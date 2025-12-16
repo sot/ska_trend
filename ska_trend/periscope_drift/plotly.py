@@ -883,7 +883,7 @@ def get_residual_v_time_line(periscope_drift_data, y_col, color=None):
         "x": x,
         "y": function[y_col](x) - periscope_drift_data.source[y_col],
         "mode": "lines",
-        "name": "residual vs time",
+        "name": "residual",
         "line": {"color": color},
         "hoverinfo": "skip",
     }
@@ -906,7 +906,7 @@ def get_smooth_residual_v_time_line(periscope_drift_data, y_col, color=None):
         "x": x,
         "y": function[y_col](x) - periscope_drift_data.source[y_col],
         "mode": "lines",
-        "name": "smooth residual vs time",
+        "name": "smooth residual",
         "line": {"color": color},
         "hoverinfo": "skip",
     }
@@ -928,7 +928,7 @@ def get_binned_data_1d_scatter(
 
     # format and color?
     trace = {
-        "name": "binned data",
+        "name": "binned",
         "x": x_vals,
         "y": y_vals,
         "mode": "markers",
@@ -1077,18 +1077,27 @@ def get_scatter_plot_figure(src_pdd):
     )
 
     smooth_line_yag.update(
-        legendgroup="smooth residual vs time",
+        legendgroup="smooth residual",
     )
     smooth_line_zag.update(
-        legendgroup="smooth residual vs time",
+        legendgroup="smooth residual",
         showlegend=False,
     )
 
     if len(scatter_yag.y) > 0:
+        yag_sigma, zag_sigma = src_pdd.spline_fit["params"][[-4, -3]]
+
         ymax = np.max(scatter_yag.y + scatter_yag.error_y["array"])
         ymin = np.min(scatter_yag.y - scatter_yag.error_y["array"])
         margin = (ymax - ymin) * 0.05
-        dy = np.max([np.abs(ymax + margin), np.abs(ymin - margin), 0.6])
+        d_yag = np.max([np.abs(ymax + margin), np.abs(ymin - margin)])
+
+        zmax = np.max(scatter_zag.y + scatter_zag.error_y["array"])
+        zmin = np.min(scatter_zag.y - scatter_zag.error_y["array"])
+        margin = (zmax - zmin) * 0.05
+        d_zag = np.max([np.abs(zmax + margin), np.abs(zmin - margin)])
+
+        dy = np.max([d_yag, d_zag, 6 * yag_sigma, 6 * zag_sigma, 1.0])
         fig.update_yaxes(range=[-dy / 2, dy / 2], row=2, col=1)
 
     if len(evt_scatter_yag.x) > 0:
@@ -1111,6 +1120,16 @@ def get_scatter_plot_figure(src_pdd):
 
     fig.add_traces([smooth_line_yag], rows=1, cols=1)
     fig.add_traces([smooth_line_zag], rows=2, cols=1)
+
+    fig.update_layout({
+        "legend": {
+            "orientation": "h",
+            "x": 0.5,
+            "y": 1.05,
+            "xanchor": "center", # Anchor the right side of the legend box to the x coordinate
+            "yanchor": "bottom",   # Anchor the top side of the legend box to the y coordinate
+        }
+    })
 
     return fig
 
@@ -1393,7 +1412,6 @@ def ellipse_trace(x0, y0, sigma_x, sigma_y, angle, color=None, name=None):
     rotation = np.array(
         [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
     )
-    # THIS SEEMS WRONG
     x, y = rotation @ np.vstack([sigma_x * np.cos(phi), sigma_y * np.sin(phi)])
     x += x0
     y += y0
@@ -1453,61 +1471,66 @@ def get_source_figure(obs, source_id):
         template="simple_white",
     )
 
-    # this is a figure with two stacked plots
+    # set the layout for the subplots
+    # this is a figure with three plots (top-right is empty)
     fig.set_subplots(
         rows=2,
         cols=2,
     )
 
+    top = 0.8
+    bottom = 0.2
+    left = 0.0
+    right = 1.0
     x_separation = 0.005
     x_split = 0.85
     y_separation = 0.02
-    y_split = 0.85
+    y_split = 0.7
     fig.update_layout(
         {
             "xaxis": {
                 "anchor": "y",
-                "domain": [0.0, x_split - x_separation],
+                "domain": [left, x_split - x_separation],
                 "showgrid": True,
                 "showticklabels": False,
+                "matches": "x3",
             },
             "xaxis2": {
                 "anchor": "y2",
-                "domain": [x_split + x_separation, 1.0],
+                "domain": [x_split + x_separation, right],
                 "showgrid": True,
             },
             "xaxis3": {
                 "anchor": "y3",
-                "domain": [0.0, x_split - x_separation],
-                "matches": "x",
+                "domain": [left, x_split - x_separation],
             },
             "xaxis4": {
                 "anchor": "y4",
-                "domain": [x_split + x_separation, 1.0],
+                "domain": [x_split + x_separation, right],
                 "showgrid": True,
                 "showticklabels": False,
                 "matches": "y",
             },
             "yaxis": {
                 "anchor": "x",
-                "domain": [y_split + y_separation, 1.0],
+                "domain": [y_split + y_separation, top],
                 "showgrid": True,
                 "showticklabels": False,
             },
             "yaxis2": {
                 "anchor": "x2",
-                "domain": [y_split + y_separation, 1.0],
+                "domain": [y_split + y_separation, top],
                 "showgrid": True,
                 "showticklabels": False,
                 "matches": "y",
             },
             "yaxis3": {
                 "scaleanchor": "x",
-                "domain": [0.0, y_split - y_separation],
+                "domain": [bottom, y_split - y_separation],
             },
             "yaxis4": {
                 "anchor": "x4",
-                "domain": [0.0, y_split - y_separation],
+                "domain": [bottom, y_split - y_separation],
                 "showgrid": True,
                 "showticklabels": False,
                 "matches": "y3",
@@ -1515,6 +1538,7 @@ def get_source_figure(obs, source_id):
         }
     )
 
+    # create the graphical objects
     heatmap = go.Histogram2d(
         x=events["y_angle"],
         y=events["z_angle"],
@@ -1522,26 +1546,8 @@ def get_source_figure(obs, source_id):
         ybins={"start": bins_y[0], "end": bins_y[-1], "size": bins_y[1] - bins_y[0]},
         colorscale="greys",
         showscale=False,
+        hoverinfo="skip",
     )
-
-    # vals, _, _ = np.histogram2d(
-    #     events["y_angle"],
-    #     events["z_angle"],
-    #     bins=(bins_x, bins_y),
-    # )
-
-    # heatmap = go.Heatmap(
-    #     {
-    #         "z": vals,
-    #         "x": bins_x[:-1] + np.diff(bins_x) / 2,
-    #         "y": bins_y[:-1] + np.diff(bins_y) / 2,
-    #         "type": "heatmap",
-    #         "colorscale": "Greys",
-    #         "reversescale": False,
-    #         "hoverinfo": "skip",
-    #         "showscale": False,
-    #     }
-    # )
 
     hist_yag = go.Histogram(
         x=events["y_angle"],
@@ -1549,6 +1555,7 @@ def get_source_figure(obs, source_id):
         xbins={"start": bins_x[0], "end": bins_x[-1], "size": bins_x[1] - bins_x[0]},
         marker={"color": "lightgrey"},
         showlegend=False,
+        hoverinfo="skip",
     )
 
     line_yag = go.Scatter(
@@ -1583,6 +1590,7 @@ def get_source_figure(obs, source_id):
         }
     )
 
+    # add all traces to figure
     fig.add_traces([hist_yag, line_yag], rows=1, cols=1)
     fig.add_traces(
         # [hist_2d],
@@ -1591,28 +1599,30 @@ def get_source_figure(obs, source_id):
         cols=1,
     )
     fig.add_traces([hist_zag, line_zag], rows=2, cols=2)
-    fig.update_layout(margin={"l": 50, "r": 50, "t": 50, "b": 50})
 
-    pos = go.Scatter(
-        {
-            "x": [source["y_angle"]],
-            "y": [source["z_angle"]],
-            # "mode": "lines",
-            # "name": "residual",
-            "marker": {"color": "red", "size": 5},
-            "hoverinfo": "skip",
-            "showlegend": False,
-        }
+    fig.add_trace(
+        go.Scatter(
+            {
+                "x": [source["y_angle"]],
+                "y": [source["z_angle"]],
+                # "mode": "lines",
+                # "name": "residual",
+                "marker": {"color": "red", "size": 5},
+                "hoverinfo": "skip",
+                "showlegend": False,
+            }
+        ),
+        row=2,
+        col=1
     )
-    fig.add_trace(pos, row=2, col=1)
 
-    sigma_1, sigma_2 = source["sigma"] / 2
+    # fit ellipse
     fig.add_trace(
         ellipse_trace(
             source["y_angle"],
             source["z_angle"],
-            sigma_1,
-            sigma_2,
+            source["sigma"][0] / 2,
+            source["sigma"][1] / 2,
             source["rot_angle"],
             color="blue",
             name="1-sigma",
@@ -1621,6 +1631,7 @@ def get_source_figure(obs, source_id):
         col=1,
     )
 
+    # PSF ellipse
     fig.add_trace(
         ellipse_trace(
             source["y_angle"],
@@ -1635,14 +1646,29 @@ def get_source_figure(obs, source_id):
         col=1,
     )
 
-    fig.update_layout(
-        legend={
-            "x": 1,
-            "y": 1,
-            "xanchor": "right", # Anchor the right side of the legend box to the x coordinate
+    d_angle = max(source["sigma_y_angle"], source["sigma_z_angle"]) * 5
+
+    # fix other things in layout (legend, titles, ranges)
+    fig.update_layout({
+        "xaxis3": {
+            "range": [source["y_angle"] - d_angle / 2, source["y_angle"] + d_angle / 2],
+            "title": "yag (arcsec)",
+        },
+        "yaxis3": {
+            "range": [source["z_angle"] - d_angle / 2, source["z_angle"] + d_angle / 2],
+            "title": "zag (arcsec)",
+        },
+        "yaxis": {
+            "range": [0., max(np.max(yag_model)*1.1, np.max(zag_model)*1.1)]
+        },
+        "legend": {
+            "orientation": "h",
+            "x": 0.5,
+            "y": 0.9,
+            "xanchor": "center", # Anchor the right side of the legend box to the x coordinate
             "yanchor": "top",   # Anchor the top side of the legend box to the y coordinate
         }
-    )
+    })
 
     return fig
 
@@ -1677,7 +1703,7 @@ def get_source_figure_simple(obs, src_id):
 
     fig.update_layout(
         {
-            "autosize": True,
+            # "autosize": True,
             "yaxis": {
                 "scaleanchor": "x",
                 "showgrid": False,
