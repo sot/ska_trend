@@ -866,6 +866,29 @@ def get_fit_1d_line(periscope_drift_data, col, y_col, bin_col="rel_time", color=
     return go.Scatter(trace)
 
 
+def get_residual_v_time_line(periscope_drift_data, y_col, color=None):
+    function = {
+        "yag": periscope_drift_data.spline_fit["spline_yag"],
+        "zag": periscope_drift_data.spline_fit["spline_zag"],
+    }
+
+    x = np.linspace(
+        periscope_drift_data.events["rel_time"].min(),
+        periscope_drift_data.events["rel_time"].max(),
+        100,
+    )
+
+    trace = {
+        "x": x,
+        "y": function[y_col](x) - periscope_drift_data.source[y_col],
+        "mode": "lines",
+        "name": "residual vs time",
+        "line": {"color": color},
+        "hoverinfo": "skip",
+    }
+    return go.Scatter(trace)
+
+
 def get_smooth_residual_v_time_line(periscope_drift_data, y_col, color=None):
     function = {
         "yag": periscope_drift_data.yag_vs_time,
@@ -880,7 +903,7 @@ def get_smooth_residual_v_time_line(periscope_drift_data, y_col, color=None):
 
     trace = {
         "x": x,
-        "y": function[y_col](x),
+        "y": function[y_col](x) - periscope_drift_data.source[y_col],
         "mode": "lines",
         "name": "smooth residual vs time",
         "line": {"color": color},
@@ -1005,8 +1028,9 @@ def get_scatter_plot_figure(src_pdd):
     evt_scatter_zag = get_events_scatter(src_pdd.events, col, "zag", color="gray")
     scatter_yag = get_binned_data_1d_scatter(src_pdd, col, "yag", bin_col, color="blue")
     scatter_zag = get_binned_data_1d_scatter(src_pdd, col, "zag", bin_col, color="blue")
-    line_yag = get_fit_1d_line(src_pdd, col, "yag", bin_col, color="blue")
-    line_zag = get_fit_1d_line(src_pdd, col, "zag", bin_col, color="blue")
+
+    line_yag = get_residual_v_time_line(src_pdd, "yag", color="blue")
+    line_zag = get_residual_v_time_line(src_pdd, "zag", color="blue")
 
     smooth_line_yag = get_smooth_residual_v_time_line(src_pdd, "yag", color="black")
     smooth_line_zag = get_smooth_residual_v_time_line(src_pdd, "zag", color="black")
@@ -1447,7 +1471,7 @@ def get_drift_history_scatter_object(sources):
     scatter = go.Scatter(
         {
             "x": CxoTime(sources["tstart"]).datetime,
-            "y": sources["drift_actual"],
+            "y": sources["drift_residual"],
             "mode": "markers",
             "name": "drift_history",
             "marker": {"color": "blue"},
@@ -1491,7 +1515,7 @@ def get_drift_scatter_objects(sources):
     drift_scatter = go.Scatter(
         {
             "x": sources["drift_expected"],
-            "y": sources["drift_actual"],
+            "y": sources["drift_residual"],
             "mode": "markers",
             "name": "Drift",
             "line": {"color": "blue"},
@@ -1510,7 +1534,7 @@ def get_drift_histograms(sources):
         {
             "name": "Drift Residual",
             # "histnorm": "probability density",
-            "x": sources["drift_actual"],
+            "x": sources["drift_residual"],
             "xbins": {
                 "start": 0,
                 "end": 4,
@@ -1600,7 +1624,7 @@ def get_drift_figure(sources):
 
     if len(sources) > 1:
         ax_max = max(
-            1.1 * max(sources["drift_expected"].max(), sources["drift_actual"].max()),
+            1.1 * max(sources["drift_expected"].max(), sources["drift_residual"].max()),
             1.5,
         )
     else:

@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 
-DATA_DIR = Path(os.environ["SKA"]) / "data" / "periscope_drift_reports"
+DATA_DIR = Path(os.environ["SKA"]) / "data" / "periscope_drift"
 
 SOURCES_FILE = DATA_DIR / "sources.fits"
 

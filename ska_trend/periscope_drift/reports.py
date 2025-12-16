@@ -56,7 +56,7 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
     large_drift_sources = large_drift_sources[
         large_drift_sources["drift_expected"] > 0.4
     ]
-    large_drift_sources.sort("drift_actual", reverse=True)
+    large_drift_sources.sort("drift_residual", reverse=True)
 
     poor_fit_sources = sources.copy()
     poor_fit_sources["OOBAGRD_pc1_null_p_value_corr"] = np.where(
@@ -74,19 +74,6 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
             "OOBAGRD_pc1_yag_null_p_value_corr",
             "OOBAGRD_pc1_zag_null_p_value_corr",
         ]
-    )
-
-    large_exp_drift_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
-    )
-    large_drift_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
-    )
-    poor_fit_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
     )
 
     source_tables = []
@@ -246,10 +233,10 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
             "yag_ndf": summary["OOBAGRD_pc1_yag_ndf"],
             "zag_null_chi2": summary["OOBAGRD_pc1_zag_null_chi2_corr"],
             "zag_ndf": summary["OOBAGRD_pc1_zag_ndf"],
-            "drift_yag_expected": summary["drift_yag_expected"],
-            "drift_zag_expected": summary["drift_zag_expected"],
-            "drift_yag_residual": summary["drift_yag_actual"],
-            "drift_zag_residual": summary["drift_zag_actual"],
+            "drift_expected_yag": summary["drift_expected_yag"],
+            "drift_expected_zag": summary["drift_expected_zag"],
+            "drift_residual_yag": summary["drift_residual_yag"],
+            "drift_residual_zag": summary["drift_residual_zag"],
             "yag_null_p_value_corr": summary["OOBAGRD_pc1_yag_null_p_value_corr"],
             "zag_null_p_value_corr": summary["OOBAGRD_pc1_zag_null_p_value_corr"],
         }

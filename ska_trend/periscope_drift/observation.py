@@ -43,12 +43,12 @@ logger = logging.getLogger("periscope_drift")
 
 
 ARCHIVE_DIR = (
-    Path(os.environ["SKA"]) / "data" / "periscope_drift_reports" / "xray_observations"
+    Path(os.environ["SKA"]) / "data" / "periscope_drift" / "xray_observations"
 )
 
 
 EXCLUDED_SOURCES_FILE = (
-    Path(os.environ["SKA"]) / "data" / "periscope_drift_reports" / "excluded_sources.h5"
+    Path(os.environ["SKA"]) / "data" / "periscope_drift" / "excluded_sources.h5"
 )
 
 
@@ -619,18 +619,18 @@ def process_source(
     src_summary.update(
         {
             "src_id": source["id"],
-            "n_points": len(binned_data),
+            "n_points": spline_fit["n_points"],
             "tstart": obs.get_info()["tstart"],
             "duration": np.max(matches["time"]) - np.min(matches["time"]),
             "d_OOBAGRD3": source["d_OOBAGRD3"],
             "d_OOBAGRD6": source["d_OOBAGRD6"],
-            "drift_yag_actual": d_yag,
-            "drift_zag_actual": d_zag,
-            "drift_actual": d_r,
+            "drift_residual_yag": d_yag,
+            "drift_residual_zag": d_zag,
+            "drift_residual": d_r,
             "drift_expected": np.max(r_corr) - np.min(r_corr),
-            "drift_yag_expected": np.max(correction["ang_y_corr"])
+            "drift_expected_yag": np.max(correction["ang_y_corr"])
             - np.min(correction["ang_y_corr"]),
-            "drift_zag_expected": np.max(correction["ang_z_corr"])
+            "drift_expected_zag": np.max(correction["ang_z_corr"])
             - np.min(correction["ang_z_corr"]),
             "OOBAGRD_corr_angle": correction["OOBAGRD_corr_angle"],
             "OOBAGRD_pc1_yag_slope": results["OOBAGRD_pc1_yag_slope"],
