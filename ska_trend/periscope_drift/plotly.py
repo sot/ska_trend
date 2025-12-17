@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import scipy
 import webcolors
+from astromon import source_detection
 from astropy.table import Table
 from cxotime import CxoTime
 from plotly.subplots import make_subplots
@@ -1387,7 +1388,268 @@ def get_pc1_figure(src_pdd):
     return fig
 
 
-def get_source_figure(src_pdd):
+def ellipse_trace(x0, y0, sigma_x, sigma_y, angle, color=None, name=None):
+    phi = np.linspace(0, 2 * np.pi, 101)
+    rotation = np.array(
+        [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+    )
+    # THIS SEEMS WRONG
+    x, y = rotation @ np.vstack([sigma_x * np.cos(phi), sigma_y * np.sin(phi)])
+    x += x0
+    y += y0
+    trace = go.Scatter(
+        {
+            "x": x,
+            "y": y,
+            "mode": "lines",
+            "name": "" if name is None else name,
+            "line": {"color": "blue" if color is None else color},
+            "hoverinfo": "skip",
+            "showlegend": True,
+        }
+    )
+    return trace
+
+
+def get_source_figure(obs, source_id):
+    box_size = 4
+
+    gaussian_sources = obs.get_sources(version="gaussian_detect", astromon_format=False)
+    idx = np.argwhere(gaussian_sources["id"] == source_id).flatten()[0]
+    source = gaussian_sources[idx]
+    events = obs.periscope_drift.get_events()
+
+    events.rename_columns(["yag", "zag"], ["y_angle", "z_angle"])
+    events = events[
+        (np.abs(events["y_angle"] - source["y_angle"]) < box_size)
+        & (np.abs(events["z_angle"] - source["z_angle"]) < box_size)
+    ]
+
+    n_bins = 40
+
+    p_signal = source["p_signal"]
+    p_bkg = 1 - p_signal
+
+    x = np.linspace(-4, 4, 1001)
+    dx = np.diff(x)[0]
+    x = x[:-1] + dx / 2
+    xx = x + source["y_angle"]
+    yy = x + source["z_angle"]
+
+    bins_x = np.linspace(-4, 4, n_bins + 1) + source["y_angle"]
+    bins_y = np.linspace(-4, 4, n_bins + 1) + source["z_angle"]
+
+    sigma_x = source["sigma_y_angle"]
+    sigma_y = source["sigma_z_angle"]
+    yag_model = p_signal * source_detection.normal_prob_1d(
+        xx, source["y_angle"], sigma_x
+    ) + p_bkg * 1 / (2 * 4)
+    zag_model = p_signal * source_detection.normal_prob_1d(
+        yy, source["z_angle"], sigma_y
+    ) + p_bkg * 1 / (2 * 4)
+
+    fig = go.Figure()
+    fig.update_layout(
+        template="simple_white",
+    )
+
+    # this is a figure with two stacked plots
+    fig.set_subplots(
+        rows=2,
+        cols=2,
+    )
+
+    x_separation = 0.005
+    x_split = 0.85
+    y_separation = 0.02
+    y_split = 0.85
+    fig.update_layout(
+        {
+            "xaxis": {
+                "anchor": "y",
+                "domain": [0.0, x_split - x_separation],
+                "showgrid": True,
+                "showticklabels": False,
+            },
+            "xaxis2": {
+                "anchor": "y2",
+                "domain": [x_split + x_separation, 1.0],
+                "showgrid": True,
+            },
+            "xaxis3": {
+                "anchor": "y3",
+                "domain": [0.0, x_split - x_separation],
+                "matches": "x",
+            },
+            "xaxis4": {
+                "anchor": "y4",
+                "domain": [x_split + x_separation, 1.0],
+                "showgrid": True,
+                "showticklabels": False,
+                "matches": "y",
+            },
+            "yaxis": {
+                "anchor": "x",
+                "domain": [y_split + y_separation, 1.0],
+                "showgrid": True,
+                "showticklabels": False,
+            },
+            "yaxis2": {
+                "anchor": "x2",
+                "domain": [y_split + y_separation, 1.0],
+                "showgrid": True,
+                "showticklabels": False,
+                "matches": "y",
+            },
+            "yaxis3": {
+                "scaleanchor": "x",
+                "domain": [0.0, y_split - y_separation],
+            },
+            "yaxis4": {
+                "anchor": "x4",
+                "domain": [0.0, y_split - y_separation],
+                "showgrid": True,
+                "showticklabels": False,
+                "matches": "y3",
+            },
+        }
+    )
+
+    heatmap = go.Histogram2d(
+        x=events["y_angle"],
+        y=events["z_angle"],
+        xbins={"start": bins_x[0], "end": bins_x[-1], "size": bins_x[1] - bins_x[0]},
+        ybins={"start": bins_y[0], "end": bins_y[-1], "size": bins_y[1] - bins_y[0]},
+        colorscale="greys",
+        showscale=False,
+    )
+
+    # vals, _, _ = np.histogram2d(
+    #     events["y_angle"],
+    #     events["z_angle"],
+    #     bins=(bins_x, bins_y),
+    # )
+
+    # heatmap = go.Heatmap(
+    #     {
+    #         "z": vals,
+    #         "x": bins_x[:-1] + np.diff(bins_x) / 2,
+    #         "y": bins_y[:-1] + np.diff(bins_y) / 2,
+    #         "type": "heatmap",
+    #         "colorscale": "Greys",
+    #         "reversescale": False,
+    #         "hoverinfo": "skip",
+    #         "showscale": False,
+    #     }
+    # )
+
+    hist_yag = go.Histogram(
+        x=events["y_angle"],
+        histnorm="probability density",
+        xbins={"start": bins_x[0], "end": bins_x[-1], "size": bins_x[1] - bins_x[0]},
+        marker={"color": "lightgrey"},
+        showlegend=False,
+    )
+
+    line_yag = go.Scatter(
+        {
+            "x": xx,
+            "y": yag_model,
+            "mode": "lines",
+            "name": "residual",
+            "line": {"color": "blue"},
+            "hoverinfo": "skip",
+            "showlegend": False,
+        }
+    )
+
+    hist_zag = go.Histogram(
+        y=events["z_angle"],
+        histnorm="probability density",
+        ybins={"start": bins_y[0], "end": bins_y[-1], "size": bins_y[1] - bins_y[0]},
+        marker={"color": "lightgrey"},
+        showlegend=False,
+    )
+
+    line_zag = go.Scatter(
+        {
+            "y": yy,
+            "x": zag_model,
+            "mode": "lines",
+            "name": "residual",
+            "line": {"color": "blue"},
+            "hoverinfo": "skip",
+            "showlegend": False,
+        }
+    )
+
+    fig.add_traces([hist_yag, line_yag], rows=1, cols=1)
+    fig.add_traces(
+        # [hist_2d],
+        [heatmap],
+        rows=2,
+        cols=1,
+    )
+    fig.add_traces([hist_zag, line_zag], rows=2, cols=2)
+    fig.update_layout(margin={"l": 50, "r": 50, "t": 50, "b": 50})
+
+    pos = go.Scatter(
+        {
+            "x": [source["y_angle"]],
+            "y": [source["z_angle"]],
+            # "mode": "lines",
+            # "name": "residual",
+            "marker": {"color": "red", "size": 5},
+            "hoverinfo": "skip",
+            "showlegend": False,
+        }
+    )
+    fig.add_trace(pos, row=2, col=1)
+
+    sigma_1, sigma_2 = source["sigma"] / 2
+    fig.add_trace(
+        ellipse_trace(
+            source["y_angle"],
+            source["z_angle"],
+            sigma_1,
+            sigma_2,
+            source["rot_angle"],
+            color="blue",
+            name="1-sigma",
+        ),
+        row=2,
+        col=1,
+    )
+
+    fig.add_trace(
+        ellipse_trace(
+            source["y_angle"],
+            source["z_angle"],
+            source["ecf_radius"] / 2,
+            source["ecf_radius"] / 2,
+            0.0,
+            color="black",
+            name="90% ECF",
+        ),
+        row=2,
+        col=1,
+    )
+
+    fig.update_layout(
+        legend={
+            "x": 1,
+            "y": 1,
+            "xanchor": "right", # Anchor the right side of the legend box to the x coordinate
+            "yanchor": "top",   # Anchor the top side of the legend box to the y coordinate
+        }
+    )
+
+    return fig
+
+
+def get_source_figure_simple(obs, src_id):
+    src_pdd = obs.periscope_drift.get_periscope_drift_data().data[src_id]
+
     margin = 5
     bins = np.linspace(-margin - 0.5, margin + 0.5, 10 * int(2 * margin + 1) + 1)
     bin_centers = bins[:-1] + np.diff(bins) / 2

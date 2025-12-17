@@ -218,7 +218,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     }
     template = JINJA_ENV.get_template("source_report.html")
 
-    source = plots.get_source_figure(src_pdd)
+    source = plots.get_source_figure(obs, src_id)
     source.update_layout({"margin": {"l": 0, "r": 0, "b": 0, "t": 0}})
 
     summary = src_pdd.summary
