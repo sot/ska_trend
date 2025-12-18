@@ -146,8 +146,16 @@ def write_html_report(
     outdir = Path(outdir)
     outdir.mkdir(exist_ok=True, parents=True)
 
-    # this string is used in the template to link to the source report
-    # it should match what is done below for src_file
+    # This is a javascript format string that, when interpolated, will give the relative path
+    # from the main report page to the source report. It is used to generate links from a plotly
+    # scatter plot which has obsid and src_id values. It needs to be a JS format string because the
+    # interpolation is done in the onClick method.
+    #
+    # This string should match the src_file value passed to write_source_html_report.
+    #
+    # Note that we keep track of this relative path for all sources in the sources table.
+    # This is used to generate files like sources/all.json that can be used to navigate
+    # between source reports.
     source_report_path = (
         "`sources/${String(Math.floor(Number(obsid) / 1e3)).padStart(2, '0')}"
         "/${obsid}/${src_id}/index.html`"
@@ -171,8 +179,8 @@ def write_html_report(
             / str(src_id)
             / "index.html"
         )
-        write_source_html_report(obs, src_id, src_file, overwrite=overwrite)
-        source_files.append(str(src_file.relative_to(outdir)))
+        write_source_html_report(obs, src_id, src_file.as_posix(), overwrite=overwrite)
+        source_files.append(src_file.relative_to(outdir).as_posix())
 
     sources["filename"] = source_files
 

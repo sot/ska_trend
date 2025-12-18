@@ -11,6 +11,9 @@
 				rel="stylesheet"
 				integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3"
 				crossorigin="anonymous">
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
+    rel="stylesheet">
 
 	<style>
 		h1 {
@@ -24,16 +27,21 @@
   <title>Periscope Trending Report</title>
 </head>
 
-<body>
-	<div class="container-md">
-		<!--#include virtual="/incl/header.html"-->
-	</div>
+<body data-observation="{{ source.obsid }}" data-source-id="{{ source.id }}" root-dir="../../../..">
 
   <div class="container-md">
+
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+      <a class="navbar-brand me-auto" href="../../../..">Periscope Drift</a>
+      <div class="navbar-nav">
+
+        <a class="nav-item nav-link" href="#previous"><i class="bi bi-arrow-left"></i> prev</a>
+        <a class="nav-item nav-link" href="#next">next <i class="bi bi-arrow-right"></i> </a>
+      </div>
+    </nav>
+
     <h2> OBSID {{ source.obsid }}, source {{ source.id }} </h2>
 
-    
-    
     <div class="container">
       <div class="row">
         <div class="col-3">
@@ -230,6 +238,169 @@
   </script>
 
 </body>
+
+<script>
+
+  async function fetchObservations() {
+    // this is the key used in the URL parameters (?observations=...)
+    const urlKey = 'observations';
+    // this is the key used in session storage. Could consider making it the same as urlKey
+    // or a more unique value. Users never see this.
+    const storageKey = 'observations';
+    // the top directory. Could consider setting this elsewhere
+    const root_dir = document.body.getAttribute('root-dir');
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const obs_list = urlParams.has(urlKey)? urlParams.get(urlKey): "all";
+    const url = `${root_dir}/sources/${obs_list}.json`
+    console.log(`Will fetch ${urlKey} list from url params: ${url}`);
+
+    // this checks if the file exists. If it doesn't, return an empty list
+    const response = await fetch(url, { method: 'HEAD' });
+    if ( !response.ok ) {
+      console.log(`Failed fetching ${url}. Status: ${response.status}`);
+      return [[], -1];
+    }
+
+    // this checks if the file changed by comparing a stored ETag value with the current one
+    const storedETag = sessionStorage.getItem(`${storageKey}_etag`);
+    const currentETag = response.headers.get('etag');
+    const outdated = (storedETag !== currentETag);
+
+    // fetch from session storage if available and not outdated
+    // else fetch from server and update session storage
+    // note that session storage stays until the tab is closed
+    var entries = null;
+    const json_str = sessionStorage.getItem(storageKey);
+    if (json_str && !outdated) {
+      console.log(`found ${storageKey} in session storage`);
+      entries = JSON.parse(json_str);
+    }
+    else {
+      if ( !json_str ) {
+        console.log(`no ${storageKey} in session storage`);
+      }
+      else if (outdated) {
+        console.log(`ETag has changed, fetching new ${storageKey}`);
+      }
+      sessionStorage.setItem(`${storageKey}_etag`, currentETag);
+      // Fetch the JSON file containing the URLs
+      console.log(`fetching ${storageKey} from: ${url}`);
+      const response = await fetch(url); // Replace with the actual URL if different
+      entries = await response.json();
+      sessionStorage.setItem(storageKey, JSON.stringify(entries));
+    }
+
+    // Get this document's observation from the body tag
+    // and find its index in the list. If it is not found, index will be -1
+    const currentEntry = document.body.getAttribute('data-observation');
+    const currentSourceId = document.body.getAttribute('data-source-id');
+    const currentIndex = entries.findIndex(
+      ([obs, src_id, url]) => (
+        obs.toString() === currentEntry.toString()
+        && src_id.toString() === currentSourceId.toString()
+      )
+    );
+
+    // Update button states
+    // (next/previous buttons are enabled/disabled depending on the position in the list)
+    _disableButtons_(entries, currentIndex)
+
+    console.log("entries", entries);
+    console.log("current entry:", currentEntry);
+    console.log("current source id:", currentSourceId);
+    console.log("current index:", currentIndex);
+
+    return [entries, currentIndex];
+  }
+
+  function goToObservation(targetURL) {
+    const urlKey = 'observations';
+    // the top directory. Could consider setting this elsewhere
+    const root_dir = document.body.getAttribute('root-dir');
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has(urlKey)) {
+      const obs_list = urlParams.get(urlKey);
+      targetURL = `${targetURL}?${urlKey}=${obs_list}`;
+    }
+    window.location.href = `${root_dir}/${targetURL}`;
+  }
+
+  async function previous() {
+    const [entries, currentIndex] = await fetchObservations();
+    targetIndex = currentIndex - 1;
+
+    // Check if the current index is within bounds
+    if (currentIndex < 0 || currentIndex > entries.length - 1) {
+      alert("This entry is not in the list. Cannot navigate to previous.");
+    }
+    // Check if the target index is within bounds
+    else if (targetIndex < 0) {
+      alert('No more entries in this direction.');
+    }
+    else {
+      goToObservation(entries[targetIndex][2]);
+    }
+  }
+
+  async function next() {
+    const [entries, currentIndex] = await fetchObservations();
+    targetIndex = currentIndex + 1;
+
+    // Check if the current index is within bounds
+    if (currentIndex < 0 || currentIndex > entries.length - 1) {
+      alert("This entry is not in the list. Cannot navigate to next.");
+    }
+    // Check if the target index is within bounds
+    else if (targetIndex > entries.length - 1) {
+      alert("No more entries in this direction.");
+    }
+    else {
+      goToObservation(entries[targetIndex][2]);
+    }
+  }
+
+  async function disableButtons() {
+    const [entries, currentIndex] = await fetchObservations();
+    _disableButtons_(entries, currentIndex);
+  }
+  
+  function _disableButtons_(entries, currentIndex) {
+    // Disable the "next"("previous") button if at the end(start) of the list
+    if (currentIndex <= 0) {
+      document.querySelector('a[href="#previous"]').classList.add('disabled');
+    }
+    else {
+      document.querySelector('a[href="#previous"]').classList.remove('disabled');
+    }
+    if (currentIndex >= entries.length - 1 || currentIndex === -1) {
+      document.querySelector('a[href="#next"]').classList.add('disabled');
+    }
+    else {
+      document.querySelector('a[href="#next"]').classList.remove('disabled');
+    }
+
+  }
+</script>
+
+<script>
+// Attach event listeners to the navigation links
+document.querySelector('a[href="#next"]').addEventListener('click', (e) => {
+    e.preventDefault();
+    next();
+});
+
+document.querySelector('a[href="#previous"]').addEventListener('click', (e) => {
+    e.preventDefault();
+    previous();
+});
+</script>
+
+<script>
+  disableButtons();
+</script>
+
 </html>
 
 
