@@ -7,8 +7,11 @@ The Observation class is a subclass of astromon.observation.Observation.
 
 import functools
 import logging
+import os
 import warnings
+import weakref
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import astromon
@@ -17,7 +20,9 @@ import numpy as np
 import scipy
 import scipy.interpolate
 import ska_numpy
-from astromon.stored_result import stored_result
+from astromon import source_detection
+from astromon.db import is_in_excluded_region
+from astromon.stored_result import StorableClass, stored_result
 from astromon.task import ReturnCode, run_tasks
 from astropy import table
 from astropy import units as u
@@ -28,11 +33,21 @@ from chandra_aca.transform import radec_to_yagzag
 from cheta import fetch
 from cxotime import CxoTime
 from Quaternion import Quat
-from scipy.interpolate import make_smoothing_spline
+from scipy.interpolate import BSpline, make_smoothing_spline
 
-from ska_trend.periscope_drift.correction import get_expected_correction
+from ska_trend.periscope_drift.correction import (
+    get_expected_correction as _get_expected_correction,
+)
 
 logger = logging.getLogger("periscope_drift")
+
+
+ARCHIVE_DIR = Path(os.environ["SKA"]) / "data" / "periscope_drift" / "xray_observations"
+
+
+EXCLUDED_SOURCES_FILE = (
+    Path(os.environ["SKA"]) / "data" / "periscope_drift" / "excluded_sources.h5"
+)
 
 
 GRADIENTS = [
@@ -55,6 +70,7 @@ class SourceData:
     fits_1d: table.Table
     yag_vs_time: Any
     zag_vs_time: Any
+    spline_fit: dict[str, Any]
 
 
 @dataclass
@@ -65,8 +81,8 @@ class ObservationData:
     expected_correction: dict[str, Any]
 
 
-class PeriscopeDriftData:
-    def __init__(self, obs):
+class PeriscopeDriftData(StorableClass):
+    def __init__(self, obs, workdir=None, archive_dir=None):
         """
         Class with methods related to periscope drift data.
 
@@ -75,23 +91,29 @@ class PeriscopeDriftData:
         obs : Observation
             Astromon Observation object.
         """
-        self.obs = obs
+        if archive_dir is None:
+            archive_dir = ARCHIVE_DIR
+        self.obs = weakref.proxy(obs)
+        super().__init__(
+            archive_dir=archive_dir,
+            workdir=workdir,
+            subdir=Path(f"obs{int(obs.obsid) // 1000:02d}") / f"{obs.obsid}",
+        )
 
-    @property
-    def storage(self):
-        # the stored_result decorator needs self.storage so things are stored in the right place
-        return self.obs.storage
-
-    @property
-    def cache_dir(self):
+    def archive(self, *regex):
         """
-        Cache location property used by the cache (it uses value from the observation).
-        """
-        return self.obs.cache_dir
+        Move observation files to an archive location.
 
-    @stored_result("table", fmt="table", subdir="cache")
-    def get_table(self):
-        return table.Table({"a": np.arange(10), "b": np.arange(10) + 1})
+        Parameters
+        ----------
+        regex: list of str
+            Optional. If not given, self.archive_regex is used.
+            Files matching any of the strings are arcived in a long-term location.
+        """
+        if not regex:
+            regex = ["periscope_drift"]
+
+        super().archive(*regex)
 
     def is_selected(self):
         obsid_info = self.obs.get_info()
@@ -110,23 +132,66 @@ class PeriscopeDriftData:
             )
         )
 
-    def is_selected_source(self, source):
-        max_ang_corr = np.sqrt(
-            source["max_yang_corr"] ** 2 + source["max_zang_corr"] ** 2
+    @staticmethod
+    def is_selected_source(source, exclude_regions=True):
+        """
+        Return a boolean array indicating which sources are selected.
+
+        The function can optionally exclude sources in astromon excluded regions. Excluded regions
+        can change at any time, so by default we do not use them when caching source data.
+
+        Parameters
+        ----------
+        source : astropy.table.Table
+            Table with source data.
+        exclude_regions : bool, optional
+            Whether to exclude sources in excluded regions, by default True.
+        Returns
+        -------
+        numpy.ndarray
+            Boolean array indicating which sources are selected.
+        """
+        result = (
+            PeriscopeDriftData.is_pre_selected_source(source)
+            & (source["snr"] > 90)
+            & (source["psfratio"] < 1.2)
         )
-        return (
-            (
-                (source["d_OOBAGRD3"] > 0.05)
-                | (source["d_OOBAGRD6"] > 0.005)
-                | (max_ang_corr > 0.1)
+        if exclude_regions:
+            pos = SkyCoord(source["ra"] * u.deg, source["dec"] * u.deg)
+            result &= ~is_in_excluded_region(
+                pos, source["obsid"], dbfile=EXCLUDED_SOURCES_FILE
             )
-            & (source["snr"] > 10)
-            & (source["net_counts"] > 1000)
+        return result
+
+    @staticmethod
+    def is_pre_selected_source(source):
+        """
+        Return a boolean array indicating which sources are pre-selected.
+
+        This method is intended to to reduce the number of sources before processing. It is not the
+        final selection. As such, the criteria are looser than those in is_selected_source. The idea
+        is that we often want to see how the pre-selected sources behave even if they do not pass.
+
+        Parameters
+        ----------
+        source : astropy.table.Table
+            Table with source data.
+
+        Returns
+        -------
+        numpy.ndarray
+            Boolean array indicating which sources are pre-selected.
+        """
+        result = (
+            (source["snr"] > 3)
+            & (source["net_counts"] > 200)
             # distance to closest source. Extended sources can be split into several sources
+            # and we currently model sources in a 8x8 arcsec box.
             & (source["near_neighbor_dist"] > 6)
             # psfratio is the ratio of the source ellipse to the PSF size
-            & (source["psfratio"] < 0.6)
+            & (source["psfratio"] < 3.0)
         )
+        return result
 
     def get_events(self):
         # THIS IS A HACK: the "dependencies" decorator does not work on PeriscopeDriftData
@@ -159,9 +224,11 @@ class PeriscopeDriftData:
             f"{events_file}[cols time,ra,dec,x,y]",
             outfile,
             clobber="yes",
-            logging_tag=str(self),
+            logging_tag=f"OBSID={self.obs.obsid}",
         )
-        events = table.Table.read(outfile, hdu=1)
+        # calling as_array converts to native byteorder
+        # (some tools like pandas and seaborn do not support big endian on little endian machines)
+        events = table.Table(table.Table.read(outfile, hdu=1).as_array())
         events["yag"], events["zag"] = radec_to_yagzag(events["RA"], events["DEC"], att)
 
         if len(events) > 0:
@@ -195,13 +262,30 @@ class PeriscopeDriftData:
                 events["OOBAGRD_pc1"] = np.nan
         return events
 
-    @stored_result("periscope_drift_sources", fmt="table", subdir="cache")
+    @stored_result("periscope_drift_sources", fmt="table", subdir="periscope_drift")
     def get_sources(self, apply_filter=True):
-        src = self.obs.get_sources(version="celldetect")
+        src = self.obs.get_sources(version="gaussian_detect")
 
         if len(src) == 0:
-            # and we use ID often to traverse the table... so make sure the column exists
-            return table.Table(dtype=[("id", int)])
+            dtype = np.dtype(
+                [
+                    ("obsid", ">i8"),
+                    ("id", ">i4"),
+                    ("ra", ">f8"),
+                    ("dec", ">f8"),
+                    ("net_counts", ">f4"),
+                    ("y_angle", ">f8"),
+                    ("z_angle", ">f8"),
+                    ("r_angle", ">f8"),
+                    ("snr", ">f4"),
+                    ("near_neighbor_dist", ">f8"),
+                    ("psfratio", ">f4"),
+                    ("pileup", ">f4"),
+                    ("acis_streak", "?"),
+                    ("caldb_version", "<U6"),
+                ]
+            )
+            return table.Table(dtype=dtype)
 
         obs_info = self.obs.get_info()
         att = Quat([obs_info["ra_nom"], obs_info["dec_nom"], obs_info["roll_nom"]])
@@ -231,7 +315,7 @@ class PeriscopeDriftData:
         stop = CxoTime(float(obs_info["tstop"]))
         telem = fetch_telemetry(start, stop)
 
-        corr = get_expected_correction(telem)
+        corr = self.get_expected_correction()
 
         if len(telem["time"]) > 0:
             src["d_OOBAGRD3"] = telem["OOBAGRD3"].max() - telem["OOBAGRD3"].min()
@@ -260,10 +344,7 @@ class PeriscopeDriftData:
         src["acis"] = self.obs.is_acis
         src["hrc"] = self.obs.is_hrc
 
-        src["theta"] = [
-            self.obs.dmcoords("theta", option="cel", celfmt="deg", ra=ra, dec=dec)
-            for ra, dec in src[["ra", "dec"]]
-        ]
+        src["theta"] = self.obs.get_off_axis_angle(ra=src["ra"], dec=src["dec"])
 
         formats = {
             "ra": ".5f",
@@ -289,17 +370,23 @@ class PeriscopeDriftData:
             src[col].format = fmt
 
         if apply_filter:
-            src = src[self.is_selected_source(src)]
+            # this will be cached, so do not use excluded regions (they can change at any time)
+            src = src[self.is_selected_source(src, exclude_regions=False)]
 
         return src
 
-    @stored_result("periscope_drift_summary", fmt="pickle", subdir="cache")
-    def get_summary(self):
+    @stored_result("expected_correction", fmt="pickle", subdir="periscope_drift")
+    def get_expected_correction(self):
         obspar = self.obs.get_obspar()
         tstart = float(obspar["tstart"])
         tstop = float(obspar["tstop"])
         telem = fetch_telemetry(CxoTime(tstart), CxoTime(tstop))
-        correction = get_expected_correction(telem)
+        return _get_expected_correction(telem)
+
+    @stored_result("periscope_drift_summary", fmt="pickle", subdir="periscope_drift")
+    def get_summary(self):
+        obspar = self.obs.get_obspar()
+        correction = self.get_expected_correction()
 
         # maybe the corresponding stuff in get_sources should be removed
         info = {
@@ -326,8 +413,8 @@ class PeriscopeDriftData:
             {
                 "obsid_selected": self.is_selected(),
                 "OOBAGRD_corr_angle": correction["OOBAGRD_corr_angle"],
-                "tstart": tstart,
-                "tstop": tstop,
+                "tstart": float(obspar["tstart"]),
+                "tstop": float(obspar["tstop"]),
                 "datamode": obspar.get("datamode", ""),
                 "readmode": obspar.get("readmode", ""),
                 "dtycycle": obspar.get("dtycycle", -1),
@@ -335,17 +422,13 @@ class PeriscopeDriftData:
         )
         return info
 
-    @stored_result("periscope_drift_data", fmt="pickle", subdir="cache")
-    def get_periscope_drift_data(self):
-        src = self.get_sources()
+    @stored_result("source_data", fmt="pickle", subdir="periscope_drift")
+    def get_source_data(self):
+        src = self.get_sources(apply_filter=False)
+        selected = self.is_pre_selected_source(src)
+        src = src[selected]
         events = self.get_events()
-        telem = fetch_telemetry(
-            CxoTime(float(self.obs.get_obspar()["tstart"])),
-            CxoTime(float(self.obs.get_obspar()["tstop"])),
-        )
-        correction = get_expected_correction(telem)
-
-        info = self.get_summary()
+        correction = self.get_expected_correction()
 
         # process all sources
         binned_data = {
@@ -353,13 +436,21 @@ class PeriscopeDriftData:
             for source in src
             if (dat := process_source(self.obs, source, events, correction))
         }
-        src = src[np.in1d(src["id"], list(binned_data.keys()))]
+        return binned_data
 
+    def get_periscope_drift_data(self):
+        data = self.get_source_data()
+        src = self.get_sources(apply_filter=False)
+
+        source_ids = list(set(data.keys()) & set(src["id"]))
+
+        src = src[np.in1d(src["id"], source_ids)]
+        data = {sid: data[sid] for sid in source_ids}
         return ObservationData(
-            summary=info,
+            summary=self.get_summary(),
             sources=src,
-            data=binned_data,
-            expected_correction=correction,
+            data=data,
+            expected_correction=self.get_expected_correction(),
         )
 
     def fetch_telemetry(self):
@@ -369,11 +460,6 @@ class PeriscopeDriftData:
         return fetch_telemetry(start, stop)
 
 
-class PeriscopeDriftDataProperty:
-    def __get__(self, obj, objtype_):
-        return PeriscopeDriftData(obj)
-
-
 class Observation(astromon.observation.Observation):
     """
     Observation class for processing periscope drift data.
@@ -381,10 +467,24 @@ class Observation(astromon.observation.Observation):
     This class is a subclass of astromon.observation.Observation.
     """
 
-    def __init__(self, obsid, workdir=None, archive_dir=None):
-        super().__init__(obsid, workdir=workdir, archive_dir=archive_dir)
+    def __init__(
+        self,
+        obsid,
+        workdir=None,
+        archive_dir=None,
+        astromon_workdir=None,
+        astromon_archive_dir=None,
+    ):
+        if astromon_workdir is None:
+            astromon_workdir = workdir
 
-    periscope_drift = PeriscopeDriftDataProperty()
+        super().__init__(
+            obsid, workdir=astromon_workdir, archive_dir=astromon_archive_dir
+        )
+
+        self.periscope_drift = PeriscopeDriftData(
+            self, workdir=workdir, archive_dir=archive_dir
+        )
 
 
 def process_source(
@@ -406,14 +506,6 @@ def process_source(
     matches["residual_zag"] = matches["zag"] - source["zag"]
     matches["src_id"] = source["id"]
     matches["obsid"] = obs.obsid
-
-    # require at least 3 bins in each column
-    # if (
-    #     len(np.unique(matches[["OOBAGRD3"]])) < 3
-    #     or len(np.unique(matches[["OOBAGRD6"]])) < 3
-    # ):
-    #     logger.debug(f"Not enough points in OBSID {obs.obsid} source {source['id']}")
-    #     return {}
 
     fits = [
         fit(
@@ -463,12 +555,6 @@ def process_source(
             "OOBAGRD_pc1_std",
         ]
     )
-    # this one might not be necessary
-    # fits += [
-    #     fit(obs, source["id"], matches, col, target_col, extra_cols=["OOBAGRD3", "OOBAGRD6"])
-    #     for col in ["OOBAGRD3", "OOBAGRD6"]
-    #     for target_col in ["yag", "zag"]
-    # ]
 
     binned_data = table.hstack([yag_fits, zag_fits], table_names=["yag", "zag"])
 
@@ -508,63 +594,59 @@ def process_source(
         if col in binned_data.colnames:
             binned_data[col].format = fmt
 
+    spline_fit = do_spline_fit(obs, source["id"])
+
     ## Summary
-    yag_vs_time = get_smoothing_spline(binned_data, "yag")
-    zag_vs_time = get_smoothing_spline(binned_data, "zag")
-
-    cols = [
-        "rel_time",
-        "OOBAGRD3",
-        "OOBAGRD6",
-        "OOBAGRD_pc1",
-    ]
-    y_cols = [
-        "yag",
-        "zag",
-    ]
-
     x = np.linspace(matches["rel_time"].min(), matches["rel_time"].max(), 2000)
-    yag = yag_vs_time(x)
+    yag = spline_fit["smooth_spline_yag"](x)
     d_yag = np.max(yag) - np.min(yag)
 
-    zag = zag_vs_time(x)
+    zag = spline_fit["smooth_spline_zag"](x)
     d_zag = np.max(zag) - np.min(zag)
 
-    d_r = np.max(np.sqrt(yag**2 + zag**2))
+    d_r = np.max(np.sqrt((yag - np.min(yag)) ** 2 + (zag - np.min(zag)) ** 2))
 
     results = {
-        "src_id": source["id"],
-        "d_OOBAGRD3": source["d_OOBAGRD3"],
-        "d_OOBAGRD6": source["d_OOBAGRD6"],
+        **_summarize_col_(binned_data, line_fit, "OOBAGRD_pc1", "yag"),
+        **_summarize_col_(binned_data, line_fit, "OOBAGRD_pc1", "zag"),
     }
-    for col in cols:
-        for y_col in y_cols:
-            result = _summarize_col_(binned_data, line_fit, col, y_col)
-            results.update(result)
-
-    duration = np.max(matches["time"]) - np.min(matches["time"])
 
     r_corr = np.sqrt(correction["ang_y_corr"] ** 2 + correction["ang_y_corr"] ** 2)
-    results.update(
-        {
-            "duration": duration,
-            "drift_yag_actual": d_yag,
-            "drift_zag_actual": d_zag,
-            "drift_actual": d_r,
-            "drift_expected": np.max(r_corr) - np.min(r_corr),
-            "drift_yag_expected": np.max(correction["ang_y_corr"])
-            - np.min(correction["ang_y_corr"]),
-            "drift_zag_expected": np.max(correction["ang_z_corr"])
-            - np.min(correction["ang_z_corr"]),
-            "drift_yag_fit": results["d_OOBAGRD3"] * results["OOBAGRD3_yag_slope"],
-            "drift_zag_fit": results["d_OOBAGRD6"] * results["OOBAGRD6_zag_slope"],
-        }
-    )
 
     src_summary = dict(source)
-    src_summary["OOBAGRD_corr_angle"] = correction["OOBAGRD_corr_angle"]
-    src_summary["tstart"] = obs.get_info()["tstart"]
-    src_summary.update(results)
+    src_summary.update(
+        {
+            "src_id": source["id"],
+            "n_points": spline_fit["n_points"],
+            "tstart": obs.get_info()["tstart"],
+            "duration": np.max(matches["time"]) - np.min(matches["time"]),
+            "d_OOBAGRD3": source["d_OOBAGRD3"],
+            "d_OOBAGRD6": source["d_OOBAGRD6"],
+            "drift_residual_yag": d_yag,
+            "drift_residual_zag": d_zag,
+            "drift_residual": d_r,
+            "drift_expected": np.max(r_corr) - np.min(r_corr),
+            "drift_expected_yag": np.max(correction["ang_y_corr"])
+            - np.min(correction["ang_y_corr"]),
+            "drift_expected_zag": np.max(correction["ang_z_corr"])
+            - np.min(correction["ang_z_corr"]),
+            "OOBAGRD_corr_angle": correction["OOBAGRD_corr_angle"],
+            "OOBAGRD_pc1_yag_slope": results["OOBAGRD_pc1_yag_slope"],
+            "OOBAGRD_pc1_yag_slope_err": results["OOBAGRD_pc1_yag_slope_err"],
+            "OOBAGRD_pc1_zag_slope": results["OOBAGRD_pc1_zag_slope"],
+            "OOBAGRD_pc1_zag_slope_err": results["OOBAGRD_pc1_zag_slope_err"],
+            "OOBAGRD_pc1_yag_null_chi2_corr": results["OOBAGRD_pc1_yag_null_chi2_corr"],
+            "OOBAGRD_pc1_yag_ndf": results["OOBAGRD_pc1_yag_ndf"],
+            "OOBAGRD_pc1_zag_null_chi2_corr": results["OOBAGRD_pc1_zag_null_chi2_corr"],
+            "OOBAGRD_pc1_zag_ndf": results["OOBAGRD_pc1_zag_ndf"],
+            "OOBAGRD_pc1_yag_null_p_value_corr": results[
+                "OOBAGRD_pc1_yag_null_p_value_corr"
+            ],
+            "OOBAGRD_pc1_zag_null_p_value_corr": results[
+                "OOBAGRD_pc1_zag_null_p_value_corr"
+            ],
+        }
+    )
 
     return SourceData(
         source=dict(source),
@@ -572,18 +654,37 @@ def process_source(
         events=matches,
         binned_data_1d=binned_data,
         fits_1d=line_fit,
-        yag_vs_time=yag_vs_time,
-        zag_vs_time=zag_vs_time,
+        yag_vs_time=spline_fit["smooth_spline_yag"],
+        zag_vs_time=spline_fit["smooth_spline_zag"],
+        spline_fit=spline_fit,
     )
 
 
-def get_smoothing_spline(binned_data, y_col):
-    dat = binned_data[
-        (binned_data["bin_col"] == "rel_time") & (np.isfinite(binned_data[y_col]))
-    ]
+def get_smoothing_spline(x, y):
+    if len(x) == 0:
+        return BSpline([0, 1], [np.nan], k=0, extrapolate=True)
+    elif len(x) == 1:
+        # this should never happen, but I do not want to deal with this error ever.
+        # returning a constant spline
+        return BSpline([0, 1], y, k=0, extrapolate=True)
+    elif len(x) < 5:
+        # the smoothing spline call fails with too few points
+        # will return a first degree spline that evaluates to a linear regression
+        regress = scipy.stats.linregress(x, y)
+        tmin = x[0]
+        tmax = x[-1]
+        return BSpline(
+            [tmin - 1, tmin, tmax, tmax + 1],
+            [
+                regress.intercept + regress.slope * tmin,
+                regress.intercept + regress.slope * tmax,
+            ],
+            k=1,
+            extrapolate=True,
+        )
     # the value of lambda might seem arbitrary, but it can be estimated from cross-validation
     # this number is just close enough
-    return make_smoothing_spline(dat["rel_time_mean"], dat[y_col], lam=3e9)
+    return make_smoothing_spline(x, y, lam=3e9)
 
 
 def round_to_uncertainty(x, err):
@@ -596,8 +697,9 @@ def _summarize_col_(binned_data_1d, fits_1d, col, y_col, bin_col="rel_time"):
     sel = (binned_data_1d["bin_col"] == bin_col) & np.isfinite(binned_data_1d[y_col])
     binned_data = binned_data_1d[sel]
 
-    sel = (fits_1d["x_col"] == col) & (fits_1d["target_col"] == y_col)
-    if np.any(sel):
+    if "x_col" in fits_1d.colnames and np.any(
+        sel := (fits_1d["x_col"] == col) & (fits_1d["target_col"] == y_col)
+    ):
         line_fit = dict(fits_1d[sel][0])
     else:
         line_fit = None
@@ -607,10 +709,10 @@ def _summarize_col_(binned_data_1d, fits_1d, col, y_col, bin_col="rel_time"):
     sigma_vals = binned_data[f"d_{y_col}"]
 
     ndf_0 = len(binned_data[y_col])
-    chi2_0 = np.sum(y_vals**2 / sigma_vals**2) / ndf_0
-    p_value_0 = scipy.stats.chi2.sf(chi2_0 * ndf_0, ndf_0)
 
-    if line_fit is not None and len(binned_data) > 0:
+    if line_fit is not None and ndf_0 > 0:
+        chi2_0 = np.sum(y_vals**2 / sigma_vals**2) / ndf_0
+        p_value_0 = scipy.stats.chi2.sf(chi2_0 * ndf_0, ndf_0)
         ndf = len(binned_data[y_col]) - 2
         params = line_fit["parameters"]
         cov = line_fit["covariance"]
@@ -632,6 +734,8 @@ def _summarize_col_(binned_data_1d, fits_1d, col, y_col, bin_col="rel_time"):
         ndf = 0
         slope = np.nan
         slope_err = np.nan
+        chi2_0 = np.nan
+        p_value_0 = np.nan
         chi2 = np.nan
         p_value = np.nan
         chi2_0_corr = np.nan
@@ -774,34 +878,10 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
         dx = np.sqrt(np.diagonal(hess_inv)) * 1e-4
         H = compute_hessian(fun, result.x, dx=dx)
 
-        ok = True
-        if np.any(np.isnan(H)) or np.any(np.isinf(H)):
-            logger.debug(
-                f"OBSID={obs.obsid}, {src_id=}:"
-                f"Hessian has Nan or inf entries ({xmin} < {bin_col} < {xmax})"
-            )
-            ok = False
-        if scipy.linalg.det(H) == 0.0:
-            logger.debug(
-                f"OBSID={obs.obsid}, {src_id=}:"
-                f"singular hessian matrix ({xmin} < {bin_col} < {xmax})"
-            )
-            ok = False
-        if not scipy.linalg.issymmetric(H):
-            logger.debug(
-                f"OBSID={obs.obsid}, {src_id=}:"
-                f"Hessian is not symmetric ({xmin} < {bin_col} < {xmax})"
-            )
-            ok = False
-
-        if ok:
-            covariance = scipy.linalg.inv(H)
-            if np.any(np.diagonal(covariance) < 0):
-                logger.debug(
-                    f"OBSID={obs.obsid}, {src_id=}:"
-                    f"Covariance has negative diagonal values ({xmin} < {bin_col} < {xmax})"
-                )
-                ok = False
+        ok = result.success and check_hessian(
+            H,
+            msg=f"OBSID={obs.obsid}, source_id={src_id} ({xmin} < {bin_col} < {xmax})",
+        )
 
         bd = {
             "obsid": obs.obsid,
@@ -839,6 +919,7 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
             )
 
         if ok:
+            covariance = scipy.linalg.inv(H)
             bd.update(
                 {
                     target_col: result.x[0],
@@ -871,15 +952,24 @@ def fit(obs, src_id, matches, bin_col, target_col, extra_cols=None):  # noqa: PL
     line_fits = []
     for x_col in ["rel_time", "OOBAGRD3", "OOBAGRD6", "OOBAGRD_pc1"]:
         ok_rows = np.isfinite(t[target_col])
+        fit_ok = False
         if np.count_nonzero(ok_rows) > 2:
-            line_fit = scipy.optimize.curve_fit(
-                line,
-                t[ok_rows][f"{x_col}_mean"],
-                t[ok_rows][target_col],
-                sigma=t[ok_rows][f"d_{target_col}"],
-                p0=[0.0, np.mean(t[ok_rows][target_col])],
-                absolute_sigma=True,
-            )
+            with warnings.catch_warnings():
+                # ignoring this warning because we will check the result below
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Covariance of the parameters could not be estimated",
+                )
+                line_fit = scipy.optimize.curve_fit(
+                    line,
+                    t[ok_rows][f"{x_col}_mean"],
+                    t[ok_rows][target_col],
+                    sigma=t[ok_rows][f"d_{target_col}"],
+                    p0=[0.0, np.mean(t[ok_rows][target_col])],
+                    absolute_sigma=True,
+                )
+            fit_ok = np.isfinite(line_fit[0]).all() and np.isfinite(line_fit[1]).all()
+        if fit_ok:
             line_fit = {
                 "bin_col": bin_col,
                 "x_col": x_col,
@@ -1092,3 +1182,242 @@ def smooth(x, window_len=10, window="hanning"):
 
     y = np.convolve(w / w.sum(), s, mode="same")
     return y[window_len - 1 : -window_len + 1]
+
+
+def get_knots(time, min_n=200, min_t=2000):
+    # we generate a list of interval edges that each has at least min_n/4 points
+    n0 = int(len(time) // (min_n / 4))
+    edges = np.percentile(time, np.linspace(0, 100, n0 + 1))
+    idx_range = np.arange(len(edges))  # an integer array to refer to entries in edges
+
+    # we will ultimately select a subset of them to ensure each interval is at least min_t long
+    # and has at least min_n points. We start by selecting good intervals from the beginning
+    sel = np.zeros_like(edges, dtype=bool)
+    sel[0] = True
+
+    idx0 = 0
+    for idx in idx_range[1:]:
+        if edges[idx] - edges[idx0] > min_t and idx - idx0 >= 4:
+            # this closes one interval and starts the next
+            sel[idx] = True
+            idx0 = idx
+
+    indices = idx_range[sel]
+
+    if not sel[-1] and np.count_nonzero(sel) > 1:
+        # fix the trailing interval by splitting it over the previous ones
+        n_intervals = indices.shape[0] - 1  # the number of resulting long intervals
+        n_trail = (
+            idx_range[-1] - indices[-1] - 1
+        )  # the number of trailing short intervals
+        n, m = n_trail // n_intervals, n_trail % n_intervals
+        intervals = np.diff(edges[indices])
+        shortest = np.argsort(intervals)[: m + 1]
+        # increase all long intervals by n small intervals
+        shift = n * np.ones_like(indices[1:])
+        # and increase the smallest m long intervals by one short interval
+        shift[shortest] += 1
+        shift = np.cumsum(shift)
+        indices[1:] += shift
+        intervals = np.diff(edges[indices])
+
+    edges = edges[indices]
+
+    if len(edges) == 1:
+        # print("Only one edge found!")
+        edges = np.array([time[0], time[-1]])
+
+    # assert edges[0] == time[0]
+    # assert edges[-1] == time[-1]
+    # this is actually not guaranteed, because intervals can be slightly smaller than min_t
+    # assert np.all(np.diff(edges) >= min_t)
+
+    edges = np.pad(edges, (3, 3), mode="edge")
+    return edges
+
+
+class Likelihood:
+    def __init__(self, x, y, knots, box_size=4, alpha=0):
+        self.degree = 3
+        self.x = x
+        self.y = y
+        self.knots = knots
+        self.box_size = box_size
+        self.alpha = alpha
+        self.dm = BSpline.design_matrix(self.x, self.knots, self.degree)
+        self.n_points = self.dm.shape[1]
+        self.count = 0
+
+    def __call__(self, x):
+        self.count += 1
+        x0 = self.dm @ x[: self.n_points]
+        x1 = self.dm @ x[self.n_points : 2 * self.n_points]
+        sigma_1, sigma_2, rho, snr = x[2 * self.n_points :]
+
+        if sigma_1 <= 0 or sigma_2 <= 0 or snr < 0:
+            return np.inf
+        s = snr / (1 + snr)
+        b = 1 / (1 + snr)
+        p = s * source_detection.normal_prob_2d(
+            self.y, x0, x1, sigma_1, sigma_2, rho
+        ) + b * source_detection.p_uniform(self.y, box_size=self.box_size)
+        res = -source_detection.nan_log(p).sum() + self.alpha * np.sum(
+            (x0 - self.y.T[0]) ** 2 + (x1 - self.y.T[1]) ** 2
+        )
+        return res
+
+
+class SplineFitUncertainty:
+    def __init__(self, spline=None, covariance=None):
+        self.spline = spline
+        self.covariance = covariance
+
+    def __call__(self, x):
+        if self.spline is None or self.covariance is None:
+            return np.nan * np.ones_like(x)
+        dm = self.spline.design_matrix(x, self.spline.t, self.spline.k).toarray()
+        # np.sqrt(np.einsum("ij,jk,ik->i", dm, cov, dm)) is the same as
+        # np.sqrt((dm @ cov @ dm.T).diagonal()) but takes less memory
+        return np.sqrt(np.einsum("ij,jk,ik->i", dm, self.covariance, dm))
+
+
+def do_spline_fit(obs, source):
+    box_size = 4
+    if np.issubdtype(type(source), np.integer):
+        gaussian_sources = obs.get_sources(
+            version="gaussian_detect", astromon_format=False
+        )
+        idx = np.argwhere(gaussian_sources["id"] == source).flatten()[0]
+        source = gaussian_sources[idx]
+    events = obs.periscope_drift.get_events()
+    events.rename_columns(["yag", "zag"], ["y_angle", "z_angle"])
+    events = events[
+        (np.abs(events["y_angle"] - source["y_angle"]) < box_size)
+        & (np.abs(events["z_angle"] - source["z_angle"]) < box_size)
+    ]
+
+    x0, x1, sigma_1, sigma_2, rho, snr = source["params"]
+
+    knot_list = get_knots(events["rel_time"].data)
+
+    likelihood = Likelihood(
+        x=events["rel_time"],
+        y=np.vstack([events["y_angle"], events["z_angle"]]).T,
+        knots=knot_list,
+        alpha=0,
+        # alpha=1e25
+    )
+
+    initial_guess = np.concatenate(
+        [
+            np.full(likelihood.n_points, x0),
+            np.full(likelihood.n_points, x1),
+            [sigma_1, sigma_2, rho, snr],
+        ]
+    )
+
+    bounds = []
+    bounds += likelihood.n_points * [(source["y_angle"] - 10, source["y_angle"] + 10)]
+    bounds += likelihood.n_points * [(source["z_angle"] - 10, source["z_angle"] + 10)]
+    bounds += [(0.1, 20)]
+    bounds += [(0.1, 20)]
+    bounds += [(-np.pi / 2, np.pi / 2)]
+    bounds += [(0.1, 1000)]
+
+    fit_result = scipy.optimize.minimize(
+        likelihood,
+        x0=initial_guess,
+        bounds=bounds,
+        options={
+            "maxfun": 50000,
+            # "ftol": 1e-6,
+        },
+    )
+
+    hess_inv = fit_result.hess_inv(np.eye(fit_result.x.shape[0]))
+    dx = np.sqrt(np.diagonal(hess_inv)) * 1e-4
+    H = compute_hessian(likelihood, fit_result.x, dx=dx)
+
+    ok = fit_result.success and check_hessian(
+        H, msg=f"OBSID={obs.obsid}, source_id={source['id']} spline fit"
+    )
+
+    maxx = int(np.ceil(events["rel_time"].max()))
+    x = np.linspace(likelihood.x.min(), likelihood.x.max(), maxx)
+    dm = BSpline.design_matrix(x, likelihood.knots, likelihood.degree)
+    spline_pos = x[np.argmax(dm.toarray(), axis=0)]
+
+    result = {
+        "degree": likelihood.degree,
+        "knots": likelihood.knots,
+        "n_points": likelihood.n_points,  # the number of degrees of freedom per axis
+        "spline_pos": spline_pos,
+        "value": fit_result.fun,
+        "success": ok,
+        "message": fit_result.message,
+        "params": fit_result.x,
+        "params_err": [np.nan, np.nan, np.nan],
+        "hess_inverse": hess_inv,
+        "covariance": np.nan * np.ones(hess_inv.shape),
+        "spline_yag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
+        "spline_zag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
+        "yag_error": SplineFitUncertainty(),
+        "zag_error": SplineFitUncertainty(),
+        "smooth_spline_yag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
+        "smooth_spline_zag": BSpline([0, 1], [np.nan], k=0, extrapolate=True),
+    }
+
+    if ok:
+        spline_yag = BSpline(likelihood.knots, fit_result.x[: likelihood.n_points], 3)
+        spline_zag = BSpline(
+            likelihood.knots,
+            fit_result.x[likelihood.n_points : 2 * likelihood.n_points],
+            3,
+        )
+
+        smspl_yag = get_smoothing_spline(spline_pos, spline_yag(spline_pos))
+        smspl_zag = get_smoothing_spline(spline_pos, spline_zag(spline_pos))
+
+        covariance = scipy.linalg.inv(H)
+        n = likelihood.n_points
+
+        result.update(
+            {
+                "covariance": covariance,
+                "params_err": np.sqrt(np.diagonal(covariance)),
+                "spline_yag": spline_yag,
+                "spline_zag": spline_zag,
+                "yag_error": SplineFitUncertainty(
+                    spline=spline_yag, covariance=covariance[:n, :n]
+                ),
+                "zag_error": SplineFitUncertainty(
+                    spline=spline_zag, covariance=covariance[n : 2 * n, n : 2 * n]
+                ),
+                "smooth_spline_yag": smspl_yag,
+                "smooth_spline_zag": smspl_zag,
+            }
+        )
+
+    return result
+
+
+def check_hessian(H, msg=None):
+    if msg is None:
+        msg = "Hessian check"
+    ok = True
+    if np.any(np.isnan(H)) or np.any(np.isinf(H)):
+        logger.debug(f"{msg}: Hessian has Nan or inf entries")
+        ok = False
+    if scipy.linalg.det(H) == 0.0:
+        logger.debug(f"{msg}: singular hessian matrix")
+        ok = False
+    if not scipy.linalg.issymmetric(H):
+        logger.debug(f"{msg}: Hessian is not symmetric")
+        ok = False
+
+    if ok:
+        covariance = scipy.linalg.inv(H)
+        if np.any(np.diagonal(covariance) < 0):
+            logger.debug(f"{msg}: Covariance has negative diagonal values")
+            ok = False
+    return ok

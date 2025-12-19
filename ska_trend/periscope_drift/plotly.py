@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import scipy
 import webcolors
+from astromon import source_detection
 from astropy.table import Table
 from cxotime import CxoTime
 from plotly.subplots import make_subplots
@@ -175,32 +176,18 @@ def plot_pc1(periscope_drift_data):
     plt.xlabel("OOBAGRD3")
     plt.title("Trajectory in gradient space")
 
-    plt.sca(axes["yag_pc1"])
-    plt.errorbar(
-        bd["OOBAGRD_pc1_mean"], bd["yag"], yerr=bd["d_yag"], fmt="o", label="yag"
-    )
-    fit = fits[
-        (fits["bin_col"] == "rel_time")
-        & (fits["x_col"] == "OOBAGRD_pc1")
-        & (fits["target_col"] == "yag")
-    ][0]
-    fit["parameters"]
-    plt.plot(x, observation.line(x, *fit["parameters"]), color="tab:orange")
-    # plt.legend(loc="best")
-    plt.xlabel("OOBAGRD PC1")
-    plt.title("YAG")
-
-    plt.sca(axes["zag_pc1"])
-    plt.errorbar(
-        bd["OOBAGRD_pc1_mean"], bd["zag"], yerr=bd["d_zag"], fmt="o", label="zag"
-    )
-    fit = fits[
-        (fits["bin_col"] == "rel_time")
-        & (fits["x_col"] == "OOBAGRD_pc1")
-        & (fits["target_col"] == "zag")
-    ][0]
-    fit["parameters"]
-    plt.plot(x, observation.line(x, *fit["parameters"]), color="tab:orange")
+    for col in ["yag", "zag"]:
+        plt.sca(axes[f"{col}_pc1"])
+        plt.errorbar(
+            bd["OOBAGRD_pc1_mean"], bd[col], yerr=bd[f"d_{col}"], fmt="o", label=col
+        )
+        if "x_col" in fits.colnames:
+            fit = fits[
+                (fits["bin_col"] == "rel_time")
+                & (fits["x_col"] == "OOBAGRD_pc1")
+                & (fits["target_col"] == col)
+            ][0]
+            plt.plot(x, observation.line(x, *fit["parameters"]), color="tab:orange")
 
     axes["zag_pc1"].sharex(axes["yag_pc1"])
     axes["zag_pc1"].sharey(axes["yag_pc1"])
@@ -208,10 +195,15 @@ def plot_pc1(periscope_drift_data):
     ymax = np.max([[bd["yag"] + bd["d_yag"]], [bd["zag"] + bd["d_zag"]]])
     ymin = np.min([[bd["yag"] - bd["d_yag"]], [bd["zag"] - bd["d_zag"]]])
     y_margin = 0.1 * (ymax - ymin)
-    plt.ylim((ymin - y_margin, ymax + y_margin))
 
-    plt.title("ZAG")
+    plt.sca(axes["yag_pc1"])
     plt.xlabel("OOBAGRD PC1")
+    plt.title("YAG")
+
+    plt.sca(axes["zag_pc1"])
+    plt.xlabel("OOBAGRD PC1")
+    plt.title("ZAG")
+    plt.ylim((ymin - y_margin, ymax + y_margin))
     plt.ylabel("Residuals (arcsec)")
 
     plt.suptitle("Fit over First Principal Component in Gradient Space")
@@ -847,10 +839,12 @@ def get_fit_1d_line(periscope_drift_data, col, y_col, bin_col="rel_time", color=
         & (np.isfinite(periscope_drift_data.binned_data_1d[y_col]))
     ]
 
-    fits_1d = periscope_drift_data.fits_1d[
-        (periscope_drift_data.fits_1d["x_col"] == col)
-        & (periscope_drift_data.fits_1d["target_col"] == y_col)
-    ]
+    fits_1d = []
+    if "x_col" in periscope_drift_data.fits_1d.colnames:
+        fits_1d = periscope_drift_data.fits_1d[
+            (periscope_drift_data.fits_1d["x_col"] == col)
+            & (periscope_drift_data.fits_1d["target_col"] == y_col)
+        ]
 
     line_fit = dict(fits_1d[0]) if len(fits_1d) > 0 else None
 
@@ -873,6 +867,29 @@ def get_fit_1d_line(periscope_drift_data, col, y_col, bin_col="rel_time", color=
     return go.Scatter(trace)
 
 
+def get_residual_v_time_line(periscope_drift_data, y_col, color=None):
+    function = {
+        "yag": periscope_drift_data.spline_fit["spline_yag"],
+        "zag": periscope_drift_data.spline_fit["spline_zag"],
+    }
+
+    x = np.linspace(
+        periscope_drift_data.events["rel_time"].min(),
+        periscope_drift_data.events["rel_time"].max(),
+        100,
+    )
+
+    trace = {
+        "x": x,
+        "y": function[y_col](x) - periscope_drift_data.source[y_col],
+        "mode": "lines",
+        "name": "residual",
+        "line": {"color": color},
+        "hoverinfo": "skip",
+    }
+    return go.Scatter(trace)
+
+
 def get_smooth_residual_v_time_line(periscope_drift_data, y_col, color=None):
     function = {
         "yag": periscope_drift_data.yag_vs_time,
@@ -887,9 +904,9 @@ def get_smooth_residual_v_time_line(periscope_drift_data, y_col, color=None):
 
     trace = {
         "x": x,
-        "y": function[y_col](x),
+        "y": function[y_col](x) - periscope_drift_data.source[y_col],
         "mode": "lines",
-        "name": "smooth residual vs time",
+        "name": "smooth residual",
         "line": {"color": color},
         "hoverinfo": "skip",
     }
@@ -911,7 +928,7 @@ def get_binned_data_1d_scatter(
 
     # format and color?
     trace = {
-        "name": "binned data",
+        "name": "binned",
         "x": x_vals,
         "y": y_vals,
         "mode": "markers",
@@ -1012,8 +1029,9 @@ def get_scatter_plot_figure(src_pdd):
     evt_scatter_zag = get_events_scatter(src_pdd.events, col, "zag", color="gray")
     scatter_yag = get_binned_data_1d_scatter(src_pdd, col, "yag", bin_col, color="blue")
     scatter_zag = get_binned_data_1d_scatter(src_pdd, col, "zag", bin_col, color="blue")
-    line_yag = get_fit_1d_line(src_pdd, col, "yag", bin_col, color="blue")
-    line_zag = get_fit_1d_line(src_pdd, col, "zag", bin_col, color="blue")
+
+    line_yag = get_residual_v_time_line(src_pdd, "yag", color="blue")
+    line_zag = get_residual_v_time_line(src_pdd, "zag", color="blue")
 
     smooth_line_yag = get_smooth_residual_v_time_line(src_pdd, "yag", color="black")
     smooth_line_zag = get_smooth_residual_v_time_line(src_pdd, "zag", color="black")
@@ -1059,23 +1077,34 @@ def get_scatter_plot_figure(src_pdd):
     )
 
     smooth_line_yag.update(
-        legendgroup="smooth residual vs time",
+        legendgroup="smooth residual",
     )
     smooth_line_zag.update(
-        legendgroup="smooth residual vs time",
+        legendgroup="smooth residual",
         showlegend=False,
     )
 
-    ymax = np.max(scatter_yag.y + scatter_yag.error_y["array"])
-    ymin = np.min(scatter_yag.y - scatter_yag.error_y["array"])
-    margin = (ymax - ymin) * 0.05
-    dy = np.max([np.abs(ymax + margin), np.abs(ymin - margin), 0.6])
-    fig.update_yaxes(range=[-dy / 2, dy / 2], row=2, col=1)
+    if len(scatter_yag.y) > 0:
+        yag_sigma, zag_sigma = src_pdd.spline_fit["params"][[-4, -3]]
 
-    xmin = np.min(evt_scatter_yag.x)
-    xmax = np.max(evt_scatter_yag.x)
-    margin = (xmax - xmin) * 0.05
-    fig.update_xaxes(range=[xmin - margin, xmax + margin], row=2, col=1)
+        ymax = np.max(scatter_yag.y + scatter_yag.error_y["array"])
+        ymin = np.min(scatter_yag.y - scatter_yag.error_y["array"])
+        margin = (ymax - ymin) * 0.05
+        d_yag = np.max([np.abs(ymax + margin), np.abs(ymin - margin)])
+
+        zmax = np.max(scatter_zag.y + scatter_zag.error_y["array"])
+        zmin = np.min(scatter_zag.y - scatter_zag.error_y["array"])
+        margin = (zmax - zmin) * 0.05
+        d_zag = np.max([np.abs(zmax + margin), np.abs(zmin - margin)])
+
+        dy = np.max([d_yag, d_zag, 6 * yag_sigma, 6 * zag_sigma, 1.0])
+        fig.update_yaxes(range=[-dy / 2, dy / 2], row=2, col=1)
+
+    if len(evt_scatter_yag.x) > 0:
+        xmin = np.min(evt_scatter_yag.x)
+        xmax = np.max(evt_scatter_yag.x)
+        margin = (xmax - xmin) * 0.05
+        fig.update_xaxes(range=[xmin - margin, xmax + margin], row=2, col=1)
 
     fig.update_yaxes(title_text="yag", row=1, col=1)
     fig.update_yaxes(title_text="zag", row=2, col=1)
@@ -1091,6 +1120,18 @@ def get_scatter_plot_figure(src_pdd):
 
     fig.add_traces([smooth_line_yag], rows=1, cols=1)
     fig.add_traces([smooth_line_zag], rows=2, cols=1)
+
+    fig.update_layout(
+        {
+            "legend": {
+                "orientation": "h",
+                "x": 0.5,
+                "y": 1.05,
+                "xanchor": "center",  # Anchor the right side of the legend box to the x coordinate
+                "yanchor": "bottom",  # Anchor the top side of the legend box to the y coordinate
+            }
+        }
+    )
 
     return fig
 
@@ -1152,6 +1193,8 @@ def get_scatter_versus_gradients_figure(src_pdd):
 
     for row, y_col in enumerate(["yag", "zag"], start=1):
         key = ("OOBAGRD3", y_col)
+        if len(scatter[key].y) == 0:
+            continue
         ymax = np.max(scatter[key].y + scatter[key].error_y["array"])
         ymin = np.min(scatter[key].y - scatter[key].error_y["array"])
         margin = (ymax - ymin) * 0.05
@@ -1366,7 +1409,283 @@ def get_pc1_figure(src_pdd):
     return fig
 
 
-def get_source_figure(src_pdd):
+def ellipse_trace(x0, y0, sigma_x, sigma_y, angle, color=None, name=None):
+    phi = np.linspace(0, 2 * np.pi, 101)
+    rotation = np.array(
+        [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+    )
+    x, y = rotation @ np.vstack([sigma_x * np.cos(phi), sigma_y * np.sin(phi)])
+    x += x0
+    y += y0
+    trace = go.Scatter(
+        {
+            "x": x,
+            "y": y,
+            "mode": "lines",
+            "name": "" if name is None else name,
+            "line": {"color": "blue" if color is None else color},
+            "hoverinfo": "skip",
+            "showlegend": True,
+        }
+    )
+    return trace
+
+
+def get_source_figure(obs, source_id):
+    box_size = 4
+
+    gaussian_sources = obs.get_sources(version="gaussian_detect", astromon_format=False)
+    idx = np.argwhere(gaussian_sources["id"] == source_id).flatten()[0]
+    source = gaussian_sources[idx]
+    events = obs.periscope_drift.get_events()
+
+    events.rename_columns(["yag", "zag"], ["y_angle", "z_angle"])
+    events = events[
+        (np.abs(events["y_angle"] - source["y_angle"]) < box_size)
+        & (np.abs(events["z_angle"] - source["z_angle"]) < box_size)
+    ]
+
+    n_bins = 40
+
+    p_signal = source["p_signal"]
+    p_bkg = 1 - p_signal
+
+    x = np.linspace(-4, 4, 1001)
+    dx = np.diff(x)[0]
+    x = x[:-1] + dx / 2
+    xx = x + source["y_angle"]
+    yy = x + source["z_angle"]
+
+    bins_x = np.linspace(-4, 4, n_bins + 1) + source["y_angle"]
+    bins_y = np.linspace(-4, 4, n_bins + 1) + source["z_angle"]
+
+    sigma_x = source["sigma_y_angle"]
+    sigma_y = source["sigma_z_angle"]
+    yag_model = p_signal * source_detection.normal_prob_1d(
+        xx, source["y_angle"], sigma_x
+    ) + p_bkg * 1 / (2 * 4)
+    zag_model = p_signal * source_detection.normal_prob_1d(
+        yy, source["z_angle"], sigma_y
+    ) + p_bkg * 1 / (2 * 4)
+
+    fig = go.Figure()
+    fig.update_layout(
+        template="simple_white",
+    )
+
+    # set the layout for the subplots
+    # this is a figure with three plots (top-right is empty)
+    fig.set_subplots(
+        rows=2,
+        cols=2,
+    )
+
+    top = 0.8
+    bottom = 0.2
+    left = 0.0
+    right = 1.0
+    x_separation = 0.005
+    x_split = 0.85
+    y_separation = 0.02
+    y_split = 0.7
+    fig.update_layout(
+        {
+            "xaxis": {
+                "anchor": "y",
+                "domain": [left, x_split - x_separation],
+                "showgrid": True,
+                "showticklabels": False,
+                "matches": "x3",
+            },
+            "xaxis2": {
+                "anchor": "y2",
+                "domain": [x_split + x_separation, right],
+                "showgrid": True,
+            },
+            "xaxis3": {
+                "anchor": "y3",
+                "domain": [left, x_split - x_separation],
+            },
+            "xaxis4": {
+                "anchor": "y4",
+                "domain": [x_split + x_separation, right],
+                "showgrid": True,
+                "showticklabels": False,
+                "matches": "y",
+            },
+            "yaxis": {
+                "anchor": "x",
+                "domain": [y_split + y_separation, top],
+                "showgrid": True,
+                "showticklabels": False,
+            },
+            "yaxis2": {
+                "anchor": "x2",
+                "domain": [y_split + y_separation, top],
+                "showgrid": True,
+                "showticklabels": False,
+                "matches": "y",
+            },
+            "yaxis3": {
+                "scaleanchor": "x",
+                "domain": [bottom, y_split - y_separation],
+            },
+            "yaxis4": {
+                "anchor": "x4",
+                "domain": [bottom, y_split - y_separation],
+                "showgrid": True,
+                "showticklabels": False,
+                "matches": "y3",
+            },
+        }
+    )
+
+    # create the graphical objects
+    heatmap = go.Histogram2d(
+        x=events["y_angle"],
+        y=events["z_angle"],
+        xbins={"start": bins_x[0], "end": bins_x[-1], "size": bins_x[1] - bins_x[0]},
+        ybins={"start": bins_y[0], "end": bins_y[-1], "size": bins_y[1] - bins_y[0]},
+        colorscale="greys",
+        showscale=False,
+        hoverinfo="skip",
+    )
+
+    hist_yag = go.Histogram(
+        x=events["y_angle"],
+        histnorm="probability density",
+        xbins={"start": bins_x[0], "end": bins_x[-1], "size": bins_x[1] - bins_x[0]},
+        marker={"color": "lightgrey"},
+        showlegend=False,
+        hoverinfo="skip",
+    )
+
+    line_yag = go.Scatter(
+        {
+            "x": xx,
+            "y": yag_model,
+            "mode": "lines",
+            "name": "residual",
+            "line": {"color": "blue"},
+            "hoverinfo": "skip",
+            "showlegend": False,
+        }
+    )
+
+    hist_zag = go.Histogram(
+        y=events["z_angle"],
+        histnorm="probability density",
+        ybins={"start": bins_y[0], "end": bins_y[-1], "size": bins_y[1] - bins_y[0]},
+        marker={"color": "lightgrey"},
+        showlegend=False,
+    )
+
+    line_zag = go.Scatter(
+        {
+            "y": yy,
+            "x": zag_model,
+            "mode": "lines",
+            "name": "residual",
+            "line": {"color": "blue"},
+            "hoverinfo": "skip",
+            "showlegend": False,
+        }
+    )
+
+    # add all traces to figure
+    fig.add_traces([hist_yag, line_yag], rows=1, cols=1)
+    fig.add_traces(
+        # [hist_2d],
+        [heatmap],
+        rows=2,
+        cols=1,
+    )
+    fig.add_traces([hist_zag, line_zag], rows=2, cols=2)
+
+    fig.add_trace(
+        go.Scatter(
+            {
+                "x": [source["y_angle"]],
+                "y": [source["z_angle"]],
+                # "mode": "lines",
+                # "name": "residual",
+                "marker": {"color": "red", "size": 5},
+                "hoverinfo": "skip",
+                "showlegend": False,
+            }
+        ),
+        row=2,
+        col=1,
+    )
+
+    # fit ellipse
+    fig.add_trace(
+        ellipse_trace(
+            source["y_angle"],
+            source["z_angle"],
+            source["sigma"][0] / 2,
+            source["sigma"][1] / 2,
+            source["rot_angle"],
+            color="blue",
+            name="1-sigma",
+        ),
+        row=2,
+        col=1,
+    )
+
+    # PSF ellipse
+    fig.add_trace(
+        ellipse_trace(
+            source["y_angle"],
+            source["z_angle"],
+            source["ecf_radius"] / 2,
+            source["ecf_radius"] / 2,
+            0.0,
+            color="black",
+            name="90% ECF",
+        ),
+        row=2,
+        col=1,
+    )
+
+    d_angle = max(source["sigma_y_angle"], source["sigma_z_angle"]) * 5
+
+    # fix other things in layout (legend, titles, ranges)
+    fig.update_layout(
+        {
+            "xaxis3": {
+                "range": [
+                    source["y_angle"] - d_angle / 2,
+                    source["y_angle"] + d_angle / 2,
+                ],
+                "title": "yag (arcsec)",
+            },
+            "yaxis3": {
+                "range": [
+                    source["z_angle"] - d_angle / 2,
+                    source["z_angle"] + d_angle / 2,
+                ],
+                "title": "zag (arcsec)",
+            },
+            "yaxis": {
+                "range": [0.0, max(np.max(yag_model) * 1.1, np.max(zag_model) * 1.1)]
+            },
+            "legend": {
+                "orientation": "h",
+                "x": 0.5,
+                "y": 0.9,
+                "xanchor": "center",  # Anchor the right side of the legend box to the x coordinate
+                "yanchor": "top",  # Anchor the top side of the legend box to the y coordinate
+            },
+        }
+    )
+
+    return fig
+
+
+def get_source_figure_simple(obs, src_id):
+    src_pdd = obs.periscope_drift.get_periscope_drift_data().data[src_id]
+
     margin = 5
     bins = np.linspace(-margin - 0.5, margin + 0.5, 10 * int(2 * margin + 1) + 1)
     bin_centers = bins[:-1] + np.diff(bins) / 2
@@ -1394,7 +1713,7 @@ def get_source_figure(src_pdd):
 
     fig.update_layout(
         {
-            "autosize": True,
+            # "autosize": True,
             "yaxis": {
                 "scaleanchor": "x",
                 "showgrid": False,
@@ -1450,7 +1769,7 @@ def get_drift_history_scatter_object(sources):
     scatter = go.Scatter(
         {
             "x": CxoTime(sources["tstart"]).datetime,
-            "y": sources["drift_actual"],
+            "y": sources["drift_residual"],
             "mode": "markers",
             "name": "drift_history",
             "marker": {"color": "blue"},
@@ -1494,7 +1813,7 @@ def get_drift_scatter_objects(sources):
     drift_scatter = go.Scatter(
         {
             "x": sources["drift_expected"],
-            "y": sources["drift_actual"],
+            "y": sources["drift_residual"],
             "mode": "markers",
             "name": "Drift",
             "line": {"color": "blue"},
@@ -1513,7 +1832,7 @@ def get_drift_histograms(sources):
         {
             "name": "Drift Residual",
             # "histnorm": "probability density",
-            "x": sources["drift_actual"],
+            "x": sources["drift_residual"],
             "xbins": {
                 "start": 0,
                 "end": 4,
@@ -1603,7 +1922,7 @@ def get_drift_figure(sources):
 
     if len(sources) > 1:
         ax_max = max(
-            1.1 * max(sources["drift_expected"].max(), sources["drift_actual"].max()),
+            1.1 * max(sources["drift_expected"].max(), sources["drift_residual"].max()),
             1.5,
         )
     else:

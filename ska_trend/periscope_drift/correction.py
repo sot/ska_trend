@@ -35,6 +35,7 @@ def get_expected_correction(telem):
         Required keys are "OOBAGRD3" and "OOBAGRD6".
     """
     corr = {
+        "time": telem["time"],
         "ang_y_corr": np.zeros_like(telem["OOBAGRD6"]),
         "ang_z_corr": np.zeros_like(telem["OOBAGRD6"]),
         "OOBAGRD_corr_angle": np.nan,

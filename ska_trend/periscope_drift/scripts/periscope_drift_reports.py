@@ -23,20 +23,38 @@ def get_parser():
         "--output",
         default=Path(os.environ["SKA"]) / "www" / "ASPECT" / "periscope_drift",
         type=Path,
-        help="Output directory",
+        help="Report output directory. Default: $SKA/www/ASPECT/periscope_drift",
     )
-    parser.add_argument("--start", default="-1825d")
+    parser.add_argument(
+        "--start",
+        default="-60d",
+        help="Start of processing interval. Default: NOW - 60d",
+    )
     parser.add_argument("--stop", default=None)
+    parser.add_argument(
+        "--start-report",
+        default="-1825d",
+        help="Start of report interval. Default: NOW - 1825d (5 years ago)",
+    )
     parser.add_argument(
         "--workdir",
         type=Path,
-        help="Working directory",
+        help="Working directory (the default is a temporary directory)",
+    )
+    parser.add_argument(
+        "--astromon-archive-dir",
+        default=Path(os.environ["SKA"]) / "data" / "astromon" / "xray_observations",
+        type=Path,
+        help="Astromon archive directory. Default: $SKA/data/astromon/xray_observations",
     )
     parser.add_argument(
         "--archive-dir",
-        default=Path(os.environ["SKA"]) / "data" / "astromon" / "archive",
+        default=Path(os.environ["SKA"])
+        / "data"
+        / "periscope_drift"
+        / "xray_observations",
         type=Path,
-        help="Archive directory",
+        help="Astromon archive directory. Default: $SKA/data/periscope_drift/xray_observations",
     )
     parser.add_argument(
         "--log-level",
@@ -53,7 +71,7 @@ def get_parser():
             "error",
             "critical",
         ],
-        help="Verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+        help="Verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: DEBUG.",
     )
     parser.add_argument(
         "--log-file",
@@ -94,17 +112,23 @@ def main():
 
     stop = now if args.stop is None else CxoTime(args.stop)
 
-    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start, re.VERBOSE):
-        start = stop + float(args.start[:-1]) * u.d
+    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start_report, re.VERBOSE):
+        start_report = stop + float(args.start_report[:-1]) * u.d
     else:
-        start = CxoTime(args.start)
+        start_report = CxoTime(args.start_report)
 
-    observations, sources, errors = processing.process_interval(
-        start,
+    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start, re.VERBOSE):
+        start_process = stop + float(args.start[:-1]) * u.d
+    else:
+        start_process = CxoTime(args.start)
+
+    errors = processing.process_interval(
+        start_process,
         stop,
         archive_dir=args.archive_dir,
+        astromon_archive_dir=args.astromon_archive_dir,
         workdir=args.workdir,
-        log_level=args.log_level,
+        log_level=args.log_level.upper(),
         show_progress=args.show_progress,
     )
 
@@ -113,24 +137,22 @@ def main():
             json.dump(errors, fh)
 
     if not args.no_output:
-        time_ranges = [
-            {"start": stop - 30 * u.day, "stop": stop, "title": "30 days"},
-            {"start": stop - 90 * u.day, "stop": stop, "title": "90 days"},
-            {"start": stop - 180 * u.day, "stop": stop, "title": "180 days"},
-            {"start": stop - 365 * u.day, "stop": stop, "title": "1 year"},
-            {"start": stop - 5 * 365 * u.day, "stop": stop, "title": "5 year"},
-        ]
-        # exclude time ranges that do not add any data
-        time_ranges = [
-            time_ranges[idx]
-            for idx in range(len(time_ranges))
-            if idx == 0 or (time_ranges[idx - 1]["start"] > start)
-        ]
+        reports.write_report(
+            start=start_report,
+            stop=stop,
+            output_dir=args.output,
+            archive_dir=args.archive_dir,
+            astromon_archive_dir=args.astromon_archive_dir,
+            workdir=args.workdir,
+            show_progress=args.show_progress,
+        )
 
-        reports.write_html_report(time_ranges, args.output, observations, sources)
+        with open(args.output / "errors.json", "w") as fh:
+            json.dump(errors, fh)
 
         with open(args.output / "sources.json", "w") as fh:
-            json.dump(sources.to_pandas().to_json(), fh)
+            all_sources = processing.get_sources()
+            fh.write(all_sources.to_pandas().to_json())
 
 
 if __name__ == "__main__":

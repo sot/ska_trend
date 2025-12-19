@@ -7,8 +7,11 @@ from pathlib import Path
 
 import jinja2
 import numpy as np
+from astropy import units as u
 from mica.archive.cda import get_ocat_web, get_proposal_abstract
+from tqdm import tqdm
 
+from ska_trend.periscope_drift import observation, processing
 from ska_trend.periscope_drift import plotly as plots
 
 __all__ = [
@@ -53,7 +56,7 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
     large_drift_sources = large_drift_sources[
         large_drift_sources["drift_expected"] > 0.4
     ]
-    large_drift_sources.sort("drift_actual", reverse=True)
+    large_drift_sources.sort("drift_residual", reverse=True)
 
     poor_fit_sources = sources.copy()
     poor_fit_sources["OOBAGRD_pc1_null_p_value_corr"] = np.where(
@@ -71,19 +74,6 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
             "OOBAGRD_pc1_yag_null_p_value_corr",
             "OOBAGRD_pc1_zag_null_p_value_corr",
         ]
-    )
-
-    large_exp_drift_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
-    )
-    large_drift_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
-    )
-    poor_fit_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
     )
 
     source_tables = []
@@ -137,9 +127,11 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
     return result
 
 
-def write_html_report(time_ranges, outdir, observations, sources, overwrite=False):
+def write_html_report(
+    time_ranges, outdir, observations, sources, overwrite=False, show_progress=False
+):
     """
-    Render and write the main page.
+    Render and write the html pages (one main page and one per source).
 
     Parameters
     ----------
@@ -154,8 +146,16 @@ def write_html_report(time_ranges, outdir, observations, sources, overwrite=Fals
     outdir = Path(outdir)
     outdir.mkdir(exist_ok=True, parents=True)
 
-    # this string is used in the template to link to the source report
-    # it should match what is done below for src_file
+    # This is a javascript format string that, when interpolated, will give the relative path
+    # from the main report page to the source report. It is used to generate links from a plotly
+    # scatter plot which has obsid and src_id values. It needs to be a JS format string because the
+    # interpolation is done in the onClick method.
+    #
+    # This string should match the src_file value passed to write_source_html_report.
+    #
+    # Note that we keep track of this relative path for all sources in the sources table.
+    # This is used to generate files like sources/all.json that can be used to navigate
+    # between source reports.
     source_report_path = (
         "`sources/${String(Math.floor(Number(obsid) / 1e3)).padStart(2, '0')}"
         "/${obsid}/${src_id}/index.html`"
@@ -165,18 +165,22 @@ def write_html_report(time_ranges, outdir, observations, sources, overwrite=Fals
 
     # the sources
     source_files = []
-    for obsid, src_id in sources["obsid", "id"]:
+    if show_progress:
+        # this is a print statement because that is where the tqdm progress bar goes
+        print("Writing source reports...")
+    src_iter = tqdm(sources["obsid", "id"]) if show_progress else sources["obsid", "id"]
+    for obsid, src_id in src_iter:
         obs = observations[str(obsid)]
         src_file = (
-            Path("sources")
+            outdir
+            / "sources"
             / f"{float(obsid) // 1e3:02.0f}"
             / f"{obsid}"
             / str(src_id)
             / "index.html"
         )
-        src_file.parent.mkdir(exist_ok=True, parents=True)
-        write_source_html_report(obs, src_id, outdir / src_file, overwrite=overwrite)
-        source_files.append(str(src_file))
+        write_source_html_report(obs, src_id, src_file.as_posix(), overwrite=overwrite)
+        source_files.append(src_file.relative_to(outdir).as_posix())
 
     sources["filename"] = source_files
 
@@ -222,7 +226,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     }
     template = JINJA_ENV.get_template("source_report.html")
 
-    source = plots.get_source_figure(src_pdd)
+    source = plots.get_source_figure(obs, src_id)
     source.update_layout({"margin": {"l": 0, "r": 0, "b": 0, "t": 0}})
 
     summary = src_pdd.summary
@@ -232,15 +236,15 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
             "yag_slope": summary["OOBAGRD_pc1_yag_slope"],
             "yag_slope_err": summary["OOBAGRD_pc1_yag_slope_err"],
             "zag_slope": summary["OOBAGRD_pc1_zag_slope"],
-            "zag_slope_err": summary["OOBAGRD_pc1_yag_slope_err"],
+            "zag_slope_err": summary["OOBAGRD_pc1_zag_slope_err"],
             "yag_null_chi2": summary["OOBAGRD_pc1_yag_null_chi2_corr"],
             "yag_ndf": summary["OOBAGRD_pc1_yag_ndf"],
             "zag_null_chi2": summary["OOBAGRD_pc1_zag_null_chi2_corr"],
             "zag_ndf": summary["OOBAGRD_pc1_zag_ndf"],
-            "drift_yag_expected": summary["drift_yag_expected"],
-            "drift_zag_expected": summary["drift_zag_expected"],
-            "drift_yag_residual": summary["drift_yag_actual"],
-            "drift_zag_residual": summary["drift_zag_actual"],
+            "drift_expected_yag": summary["drift_expected_yag"],
+            "drift_expected_zag": summary["drift_expected_zag"],
+            "drift_residual_yag": summary["drift_residual_yag"],
+            "drift_residual_zag": summary["drift_residual_zag"],
             "yag_null_p_value_corr": summary["OOBAGRD_pc1_yag_null_p_value_corr"],
             "zag_null_p_value_corr": summary["OOBAGRD_pc1_zag_null_p_value_corr"],
         }
@@ -248,7 +252,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     try:
         abstract = get_proposal_abstract(obs.obsid)
     except Exception as exc:
-        if str(exc).startswith("got error 404"):
+        if str(exc).startswith("got error 404") or str(exc).startswith("got error 503"):
             abstract = ""
         else:
             raise
@@ -261,7 +265,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     page = template.render(
         source=src_pdd.source,
         metrics=metrics,
-        source_figure=source.to_html(config={"displayModeBar": False}, **kwargs),
+        source_figure=source.to_html(**kwargs),
         scatter_plot=plots.get_scatter_plot_figure(src_pdd).to_html(**kwargs),
         scatter_vs_gradients=plots.get_scatter_versus_gradients_figure(src_pdd).to_html(
             **kwargs
@@ -274,6 +278,111 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
         plot_3d_figures=plots.get_plot_3d_figures(src_pdd).to_html(**kwargs),
         ocat=ocat,
     )
-    filename.parent.mkdir(exist_ok=True, parents=True)
+    # if filename.parent exists and is a symlink, the mkdir call raises an exception
+    if not filename.parent.exists():
+        filename.parent.mkdir(exist_ok=True, parents=True)
     with open(filename, "w") as fh:
         fh.write(page)
+
+
+def write_report(
+    start,
+    stop,
+    output_dir,
+    sources=None,
+    report_observations=None,
+    archive_dir=None,
+    astromon_archive_dir=None,
+    workdir=None,
+    overwrite=False,
+    show_progress=False,
+):
+    """
+    Write reports for a given time interval. This calls all the write_* functions.
+
+    Parameters
+    ----------
+    start : CxoTime
+        Start time of the report.
+    stop : CxoTime
+        Stop time of the report.
+    output_dir : str or Path
+        Output directory.
+    sources : Table, optional
+        Table of sources to include in the report. If None (default), all sources
+        in the given time range are included.
+    report_observations : dict, optional
+        Dictionary of observation.Observation objects to use for the report. If None
+        (default), observations are created as needed.
+    archive_dir : str or Path, optional
+        Path to the archive directory. If None (default), the value of the
+        periscope_drift archive on $SKA/data is used.
+    astromon_archive_dir : str or Path, optional
+        Path to the archive directory. If None (default), the value of the
+        astromon archive on $SKA/data is used.
+    workdir : str or Path, optional
+        Path to the work directory. If None (default), a temp directory is used.
+    """
+    time_ranges = [
+        {"start": stop - 30 * u.day, "stop": stop, "title": "30 days"},
+        {"start": stop - 90 * u.day, "stop": stop, "title": "90 days"},
+        {"start": stop - 180 * u.day, "stop": stop, "title": "180 days"},
+        {"start": stop - 365 * u.day, "stop": stop, "title": "1 year"},
+        {"start": stop - 5 * 365 * u.day, "stop": stop, "title": "5 year"},
+    ]
+    # exclude time ranges that do not add any data
+    time_ranges = [
+        time_ranges[idx]
+        for idx in range(len(time_ranges))
+        if idx == 0 or (time_ranges[idx - 1]["start"] > start)
+    ]
+
+    if sources is None:
+        sources = processing.get_sources()
+
+        report_sources = sources[
+            np.in1d(sources["obsid"], processing.get_obsids(start, stop))
+        ]
+
+        # select only sources that are selected according to fixed criteria
+        selected = observation.PeriscopeDriftData.is_selected_source(
+            report_sources, exclude_regions=True
+        )
+        selected &= report_sources["n_points"] > 2
+
+        report_sources = report_sources[selected]
+    else:
+        report_sources = sources
+
+    if report_observations is None:
+        report_observations = {
+            str(obsid): observation.Observation(
+                obsid,
+                workdir=workdir,
+                archive_dir=archive_dir,
+                astromon_workdir=workdir,
+                astromon_archive_dir=astromon_archive_dir,
+            )
+            for obsid in np.unique(report_sources["obsid"])
+        }
+
+    write_html_report(
+        time_ranges,
+        output_dir,
+        report_observations,
+        report_sources,
+        overwrite=overwrite,
+        show_progress=show_progress,
+    )
+
+    with open(Path(output_dir) / "args.json", "w") as fh:
+        args = {
+            "start": start,
+            "stop": stop,
+            "output_dir": output_dir,
+            "archive_dir": archive_dir,
+            "astromon_archive_dir": astromon_archive_dir,
+            "workdir": workdir,
+            "overwrite": False,
+        }
+        json.dump(args, fh, indent=2, default=str)

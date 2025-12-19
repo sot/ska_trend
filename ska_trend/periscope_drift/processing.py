@@ -3,14 +3,17 @@ Top-level functions to process periscope drift trending.
 """
 
 import logging
+import os
 import re
 import sys
 import traceback
 import warnings
 from multiprocessing import Pool
+from pathlib import Path
 
+import numpy as np
 from astromon.utils import CiaoProcessFailure
-from astropy.table import Table
+from astropy.table import Table, vstack
 from cxotime import CxoTime
 from ska_arc5gl import Arc5gl
 from ska_helpers.logging import basic_logger
@@ -23,7 +26,15 @@ __all__ = [
     "process_observation",
     "run_multiprocess",
     "process_interval",
+    "SOURCES_FILE",
+    "get_sources",
+    "update_sources",
 ]
+
+
+DATA_DIR = Path(os.environ["SKA"]) / "data" / "periscope_drift"
+
+SOURCES_FILE = DATA_DIR / "sources.fits"
 
 
 def get_obsids(tstart, tstop):
@@ -66,7 +77,7 @@ def get_obsids(tstart, tstop):
     return [m.group(1) for m in regex if m]
 
 
-def process_observation(obsid, work_dir, archive_dir, log_level):
+def process_observation(obsid, work_dir, archive_dir, astromon_archive_dir, log_level):
     """
     Process a single observation.
 
@@ -79,6 +90,9 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
         If it is not None, a subdirectory will be created to store temporary files.
     archive_dir : str
         Archive directory. The final location where to archive data for future use.
+    astromon_archive_dir : str
+        Archive directory for astromon data. The final location where to archive astromon data for
+        future use.
     log_level : str
         Logging level. One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
     """
@@ -97,11 +111,15 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
         obs = None
         try:
             obs = observation.Observation(
-                obsid, workdir=work_dir, archive_dir=archive_dir
+                obsid,
+                workdir=work_dir,
+                archive_dir=archive_dir,
+                astromon_archive_dir=astromon_archive_dir,
             )
 
             if obs.is_selected:
-                obs.periscope_drift.get_sources()
+                # caching both cases of get_sources explicitly
+                obs.periscope_drift.get_sources(apply_filter=True)
                 obs.periscope_drift.get_sources(apply_filter=False)
                 obs.periscope_drift.get_periscope_drift_data()
         except CiaoProcessFailure as exc:
@@ -124,9 +142,9 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
                 logger.debug(f"OBSID={obsid}           {step.line}")
         except Exception as exc:
             ok = False
-            msg = f"OBSID={obs.obsid} FAIL - skipped: {exc}"
+            msg = f"OBSID={obsid} FAIL - skipped: {exc}"
             exc_type, exc_value, exc_traceback = sys.exc_info()
-            logger.error(f"OBSID={obs.obsid} {exc_type}: {exc_value}")
+            logger.error(f"OBSID={obsid} {exc_type}: {exc_value}")
             trace = traceback.extract_tb(exc_traceback)
             for step in trace:
                 logger.error(
@@ -136,6 +154,7 @@ def process_observation(obsid, work_dir, archive_dir, log_level):
         finally:
             if obs is not None:
                 obs.archive()
+                obs.periscope_drift.archive()
         return {
             "obsid": obsid,
             "ok": ok,
@@ -156,6 +175,7 @@ def run_multiprocess(
     *,
     log_level="DEBUG",
     archive_dir=None,
+    astromon_archive_dir=None,
     n_threads=8,
     n_per_iter=10,
     show_progress=False,
@@ -172,6 +192,8 @@ def run_multiprocess(
         Logging level. One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
     archive_dir : str
         Archive directory. The final location where to archive data for future use.
+    astromon_archive_dir : str
+        Archive directory for astromon data. The final location where to archive astromon data.
     n_threads : int
         Number of threads to use for multiprocessing.
     n_per_iter : int
@@ -190,13 +212,14 @@ def run_multiprocess(
     logger = basic_logger("astromon", level=log_level)
 
     task_args = [
-        # (int(obsid), workdir, archive_dir, log_level)
-        (int(obsid), workdir, archive_dir, log_level)
+        (int(obsid), workdir, archive_dir, astromon_archive_dir, log_level)
         for obsid in obsids
     ]
 
     with Pool(processes=n_threads) as pool:
         if show_progress:
+            # this is a print statement because that is where the tqdm progress bar goes
+            print("Processing observations...")
             results = []
             n_per_iter = n_per_iter if n_per_iter else 20 * n_threads
             for t_args in tqdm(split(task_args, n_per_iter)):
@@ -211,11 +234,13 @@ def run_multiprocess(
 def process_interval(
     start,
     stop,
-    log_level="WARNING",
+    log_level=None,
     archive_dir=None,
+    astromon_archive_dir=None,
     n_threads=8,
     show_progress=True,
     workdir=None,
+    no_output=False,
 ):
     """
     Process all observations in the given time interval.
@@ -223,13 +248,15 @@ def process_interval(
     Parameters
     ----------
     start : str
-        Start of the time interval. Can be a CxoTime-like string or a relative time string.
+        Start of the time interval. Can be a CxoTime-like string.
     stop : str
-        End of the time interval. Can be a CxoTime-like string or a relative time string.
+        End of the time interval. Can be a CxoTime-like string.
     log_level : str
         Logging level. One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
     archive_dir : str
         Archive directory. The final location where to archive data for future use.
+    astromon_archive_dir : str
+        Archive directory for astromon data. The final location where to archive astromon data.
     n_threads : int
         Number of threads to use for multiprocessing.
     show_progress : bool
@@ -237,24 +264,71 @@ def process_interval(
     workdir : str
         Working directory. If this is None, a temporary directory will be created.
         If it is not None, a subdirectory will be created to store temporary files.
+    no_output : bool
+        If True, do not write output.
 
     Returns
     -------
-    observations : dict
-        Dictionary of observations, where the keys are the obsids and the values are
-        the corresponding Observation objects.
-    sources : Table
-        Table of sources, where each row corresponds to a source and the columns
-        contain the source data.
+    errors : list
+        List of tuples with the errors encountered during processing. Each tuple
+        contains the obsid and the error message.
+    """
+
+    return process_obsids(
+        get_obsids(start, stop),
+        log_level=log_level,
+        archive_dir=archive_dir,
+        astromon_archive_dir=astromon_archive_dir,
+        n_threads=n_threads,
+        show_progress=show_progress,
+        workdir=workdir,
+        no_output=no_output,
+    )
+
+
+def process_obsids(
+    obsids,
+    log_level="WARNING",
+    archive_dir=None,
+    astromon_archive_dir=None,
+    n_threads=8,
+    show_progress=True,
+    workdir=None,
+    no_output=False,
+):
+    """
+    Process all observations in the given time interval.
+
+    Parameters
+    ----------
+    obsids : list
+        List of obsids to process.
+    log_level : str
+        Logging level. One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
+    archive_dir : str
+        Archive directory. The final location where to archive data for future use.
+    astromon_archive_dir : str
+        Archive directory for astromon data. The final location where to archive astromon data.
+    n_threads : int
+        Number of threads to use for multiprocessing.
+    show_progress : bool
+        If True, show a progress bar.
+    workdir : str
+        Working directory. If this is None, a temporary directory will be created.
+        If it is not None, a subdirectory will be created to store temporary files.
+    no_output : bool
+        If True, do not write output.
+
+    Returns
+    -------
     errors : list
         List of tuples with the errors encountered during processing. Each tuple
         contains the obsid and the error message.
     """
     logger = basic_logger("astromon", level=log_level)
+    if log_level is not None:
+        logger.setLevel(log_level)
 
-    obsids = get_obsids(start, stop)
-
-    logger.info(f"Processing interval {start}-{stop}")
     logger.info(f"Processing {len(obsids)} observations with {n_threads} threads")
     results = run_multiprocess(
         obsids,
@@ -270,10 +344,16 @@ def process_interval(
     observations = {}
     summary = []
     if show_progress:
-        logger.info("Summarizing observations")
+        # this is a print statement because that is where the tqdm progress bar goes
+        print("Summarizing observations...")
     obsid_iter = tqdm(obsids) if show_progress else obsids
     for obsid in obsid_iter:
-        obs = observation.Observation(obsid, archive_dir=archive_dir, workdir=workdir)
+        obs = observation.Observation(
+            obsid,
+            workdir=workdir,
+            archive_dir=archive_dir,
+            astromon_archive_dir=astromon_archive_dir,
+        )
 
         if obs.obsid in errors:
             continue
@@ -300,4 +380,41 @@ def process_interval(
     for obsid, error in errors.items():
         logger.debug(f"    OBSID={obsid}: {error}")
 
-    return observations, summary, errors
+    if not no_output:
+        update_sources(Table(summary), obsids)
+
+    return errors
+
+
+def get_sources(filename=None):
+    """
+    Get sources on file.
+    """
+    filename = SOURCES_FILE if filename is None else filename
+    if not filename.exists():
+        raise FileNotFoundError(f"Sources file {filename} not found")
+    return Table.read(filename)
+
+
+def update_sources(sources, obsids, filename=None):
+    """
+    Update the given sources, corresponding to the given obsids, in the sources file.
+
+    The obsids parameters is used to know which entries need to be modified. This matters only if
+    the observation has no sources, in which case we want to remove any previous entries.
+    """
+
+    filename = SOURCES_FILE if filename is None else filename
+
+    if filename.exists():
+        # if the file exists, replace the entries with the newly processed ones
+        prev_sources = get_sources(filename)
+        prev_sources = prev_sources[~np.in1d(prev_sources["obsid"], obsids)]
+        if not sources or len(sources) == 0:
+            all_sources = prev_sources
+        else:
+            all_sources = vstack([prev_sources, sources], metadata_conflicts="silent")
+    else:
+        all_sources = sources
+
+    all_sources.write(filename, overwrite=True)
