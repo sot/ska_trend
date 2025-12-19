@@ -11,6 +11,9 @@
 				rel="stylesheet"
 				integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3"
 				crossorigin="anonymous">
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
+    rel="stylesheet">
 
 	<style>
 		h1 {
@@ -24,24 +27,44 @@
   <title>Periscope Trending Report</title>
 </head>
 
-<body>
-	<div class="container-md">
-		<!--#include virtual="/incl/header.html"-->
-	</div>
+<body data-observation="{{ source.obsid }}" data-source-id="{{ source.id }}" root-dir="../../../..">
 
   <div class="container-md">
+
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+      <a class="navbar-brand me-auto" href="../../../..">Periscope Drift</a>
+      <div class="navbar-nav">
+
+        <a class="nav-item nav-link" href="#previous"><i class="bi bi-arrow-left"></i> prev</a>
+        <a class="nav-item nav-link" href="#next">next <i class="bi bi-arrow-right"></i> </a>
+      </div>
+    </nav>
+
     <h2> OBSID {{ source.obsid }}, source {{ source.id }} </h2>
 
-    
-    
     <div class="container">
+      <div class="row">
+        <div class="col-3">
+          <div>
+            {{source_figure}}
+          </div>
+        </div>
+        <div class="col-9">
+          <div class="ratio">
+            {{scatter_plot}}
+          </div>
+        </div>
+      </div>
       <div class="row">
         <div class="col">
           <!-- <span class="align-baseline"> -->
           <div class="d-flex align-items-center">
-            <table class="table">
+            <table class="table table-sm">
               <tr>
                 <th scope="row"> OBSID </th> <td>{{ source.obsid }} </td>
+              </tr>
+              <tr>
+                <th scope="row"> Date </th> <td>{{ ocat.ocat.start_date }} </td>
               </tr>
               <tr>
                 <th scope="row"> ID </th> <td>{{ source.id }} </td>
@@ -55,6 +78,14 @@
               <tr>
                 <th scope="row"> zag (arcsec) </th> <td>{{ '{:.2f}'.format(source.z_angle) }} </td>
               </tr>
+            </table>
+          </div>
+          <!-- </span> -->
+        </div>
+        <div class="col">
+          <!-- <span class="align-baseline"> -->
+          <div class="d-flex align-items-center">
+            <table class="table table-sm">
               <tr>
                 <th scope="row"> N </th> <td>{{ source.net_counts }} </td>
               </tr>
@@ -75,7 +106,7 @@
           <!-- </span> -->
         </div>
         <div class="col">
-          <table class="table">
+          <table class="table table-sm">
             <tr>
               <th scope="row">  </th>
               <th scope="row">  </th>
@@ -99,20 +130,15 @@
             </tr>
             <tr>
               <th scope="row" colspan="2"> expected drift </th>
-              <td> {{ "{:.1f}".format(metrics.drift_yag_expected) }}</td>
-              <td> {{ "{:.1f}".format(metrics.drift_zag_expected) }}</td>
+              <td> {{ "{:.1f}".format(metrics.drift_expected_yag) }}</td>
+              <td> {{ "{:.1f}".format(metrics.drift_expected_zag) }}</td>
             </tr>
             <tr>
               <th scope="row" colspan="2"> drift residual </th>
-              <td> {{ "{:.1f}".format(metrics.drift_yag_residual) }}</td>
-              <td> {{ "{:.1f}".format(metrics.drift_zag_residual) }}</td>
+              <td> {{ "{:.1f}".format(metrics.drift_residual_yag) }}</td>
+              <td> {{ "{:.1f}".format(metrics.drift_residual_zag) }}</td>
             </tr>
           </table>
-        </div>
-        <div class="col">
-          <div>
-            {{source_figure}}
-          </div>
         </div>
       </div>
     </div>
@@ -126,11 +152,15 @@
         </h2>
         <div id="collapseExclude" class="accordion-collapse collapse" aria-labelledby="headingExclude" data-bs-parent="#accordionExclude">
           <div class="accordion-body">
-            <p> Login as aca and execute the following command: </p>
+            <p> Login as aca and execute the following command(s). If this region should be excluded for all OBSIDs, remove the --obsid flag. Feel free to modify the comment. </p>
+            <p> to exclude from astromon: </p>
             <p> <div id="astromon_command"> <pre>
               astromon-excluded-region add --obsid {{ source.obsid }} --ra {{ source.ra }} --dec {{ source.dec }} --radius 10 --comment "Excluded after inspection";
             </pre></div> </p>
-            <p> If this region should be excluded for all OBSIDs, remove the --obsid flag. Feel free to modify the comment. </p>
+            <p> to exclude from periscope drift: </p>
+            <p> <div id="periscope_drift_command"> <pre>
+              ska_trend_periscope_drift_regions add --obsid {{ source.obsid }} --ra {{ source.ra }} --dec {{ source.dec }} --radius 10 --comment "Excluded after inspection";
+            </pre></div> </p>
           </div>
         </div>
       </div>
@@ -152,11 +182,6 @@
       </div>
     </div>
 
-    <h2> Time Evolution </h2>
-    <!-- <div class="ratio ratio-21x9"> -->
-      <div class="ratio" style="--bs-aspect-ratio: 50%;">
-        {{scatter_plot}}
-      </div>
       
     <h2> Telemetry </h2>
     <div class="ratio" style="--bs-aspect-ratio: 40%;">
@@ -204,7 +229,178 @@
     });
   </script>
 
+  <script>
+    const pd_element = document.getElementById('periscope_drift_command');
+    pd_element.addEventListener('click', () => {
+      const htmlContent = pd_element.childNodes[1].innerHTML
+      navigator.clipboard.writeText(htmlContent);
+    });
+  </script>
+
 </body>
+
+<script>
+
+  async function fetchObservations() {
+    // this is the key used in the URL parameters (?observations=...)
+    const urlKey = 'observations';
+    // this is the key used in session storage. Could consider making it the same as urlKey
+    // or a more unique value. Users never see this.
+    const storageKey = 'observations';
+    // the top directory. Could consider setting this elsewhere
+    const root_dir = document.body.getAttribute('root-dir');
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const obs_list = urlParams.has(urlKey)? urlParams.get(urlKey): "all";
+    const url = `${root_dir}/sources/${obs_list}.json`
+    console.log(`Will fetch ${urlKey} list from url params: ${url}`);
+
+    // this checks if the file exists. If it doesn't, return an empty list
+    const response = await fetch(url, { method: 'HEAD' });
+    if ( !response.ok ) {
+      console.log(`Failed fetching ${url}. Status: ${response.status}`);
+      return [[], -1];
+    }
+
+    // this checks if the file changed by comparing a stored ETag value with the current one
+    const storedETag = sessionStorage.getItem(`${storageKey}_etag`);
+    const currentETag = response.headers.get('etag');
+    const outdated = (storedETag !== currentETag);
+
+    // fetch from session storage if available and not outdated
+    // else fetch from server and update session storage
+    // note that session storage stays until the tab is closed
+    var entries = null;
+    const json_str = sessionStorage.getItem(storageKey);
+    if (json_str && !outdated) {
+      console.log(`found ${storageKey} in session storage`);
+      entries = JSON.parse(json_str);
+    }
+    else {
+      if ( !json_str ) {
+        console.log(`no ${storageKey} in session storage`);
+      }
+      else if (outdated) {
+        console.log(`ETag has changed, fetching new ${storageKey}`);
+      }
+      sessionStorage.setItem(`${storageKey}_etag`, currentETag);
+      // Fetch the JSON file containing the URLs
+      console.log(`fetching ${storageKey} from: ${url}`);
+      const response = await fetch(url); // Replace with the actual URL if different
+      entries = await response.json();
+      sessionStorage.setItem(storageKey, JSON.stringify(entries));
+    }
+
+    // Get this document's observation from the body tag
+    // and find its index in the list. If it is not found, index will be -1
+    const currentEntry = document.body.getAttribute('data-observation');
+    const currentSourceId = document.body.getAttribute('data-source-id');
+    const currentIndex = entries.findIndex(
+      ([obs, src_id, url]) => (
+        obs.toString() === currentEntry.toString()
+        && src_id.toString() === currentSourceId.toString()
+      )
+    );
+
+    // Update button states
+    // (next/previous buttons are enabled/disabled depending on the position in the list)
+    _disableButtons_(entries, currentIndex)
+
+    console.log("entries", entries);
+    console.log("current entry:", currentEntry);
+    console.log("current source id:", currentSourceId);
+    console.log("current index:", currentIndex);
+
+    return [entries, currentIndex];
+  }
+
+  function goToObservation(targetURL) {
+    const urlKey = 'observations';
+    // the top directory. Could consider setting this elsewhere
+    const root_dir = document.body.getAttribute('root-dir');
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has(urlKey)) {
+      const obs_list = urlParams.get(urlKey);
+      targetURL = `${targetURL}?${urlKey}=${obs_list}`;
+    }
+    window.location.href = `${root_dir}/${targetURL}`;
+  }
+
+  async function previous() {
+    const [entries, currentIndex] = await fetchObservations();
+    targetIndex = currentIndex - 1;
+
+    // Check if the current index is within bounds
+    if (currentIndex < 0 || currentIndex > entries.length - 1) {
+      alert("This entry is not in the list. Cannot navigate to previous.");
+    }
+    // Check if the target index is within bounds
+    else if (targetIndex < 0) {
+      alert('No more entries in this direction.');
+    }
+    else {
+      goToObservation(entries[targetIndex][2]);
+    }
+  }
+
+  async function next() {
+    const [entries, currentIndex] = await fetchObservations();
+    targetIndex = currentIndex + 1;
+
+    // Check if the current index is within bounds
+    if (currentIndex < 0 || currentIndex > entries.length - 1) {
+      alert("This entry is not in the list. Cannot navigate to next.");
+    }
+    // Check if the target index is within bounds
+    else if (targetIndex > entries.length - 1) {
+      alert("No more entries in this direction.");
+    }
+    else {
+      goToObservation(entries[targetIndex][2]);
+    }
+  }
+
+  async function disableButtons() {
+    const [entries, currentIndex] = await fetchObservations();
+    _disableButtons_(entries, currentIndex);
+  }
+  
+  function _disableButtons_(entries, currentIndex) {
+    // Disable the "next"("previous") button if at the end(start) of the list
+    if (currentIndex <= 0) {
+      document.querySelector('a[href="#previous"]').classList.add('disabled');
+    }
+    else {
+      document.querySelector('a[href="#previous"]').classList.remove('disabled');
+    }
+    if (currentIndex >= entries.length - 1 || currentIndex === -1) {
+      document.querySelector('a[href="#next"]').classList.add('disabled');
+    }
+    else {
+      document.querySelector('a[href="#next"]').classList.remove('disabled');
+    }
+
+  }
+</script>
+
+<script>
+// Attach event listeners to the navigation links
+document.querySelector('a[href="#next"]').addEventListener('click', (e) => {
+    e.preventDefault();
+    next();
+});
+
+document.querySelector('a[href="#previous"]').addEventListener('click', (e) => {
+    e.preventDefault();
+    previous();
+});
+</script>
+
+<script>
+  disableButtons();
+</script>
+
 </html>
 
 

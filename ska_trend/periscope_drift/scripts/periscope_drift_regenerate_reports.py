@@ -40,7 +40,7 @@ def get_parser():
     )
     parser.add_argument(
         "--archive-dir",
-        default=Path(os.environ["SKA"]) / "data" / "astromon" / "archive",
+        default=Path(os.environ["SKA"]) / "data" / "astromon" / "xray_observations",
         type=Path,
         help="Astromon archive directory",
     )

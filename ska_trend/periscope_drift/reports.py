@@ -7,9 +7,7 @@ from pathlib import Path
 
 import jinja2
 import numpy as np
-from astromon.db import is_in_excluded_region
 from astropy import units as u
-from astropy.coordinates import SkyCoord
 from mica.archive.cda import get_ocat_web, get_proposal_abstract
 from tqdm import tqdm
 
@@ -58,7 +56,7 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
     large_drift_sources = large_drift_sources[
         large_drift_sources["drift_expected"] > 0.4
     ]
-    large_drift_sources.sort("drift_actual", reverse=True)
+    large_drift_sources.sort("drift_residual", reverse=True)
 
     poor_fit_sources = sources.copy()
     poor_fit_sources["OOBAGRD_pc1_null_p_value_corr"] = np.where(
@@ -76,19 +74,6 @@ def get_data_for_interval(start, stop, observations, sources, idx=0):
             "OOBAGRD_pc1_yag_null_p_value_corr",
             "OOBAGRD_pc1_zag_null_p_value_corr",
         ]
-    )
-
-    large_exp_drift_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
-    )
-    large_drift_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
-    )
-    poor_fit_sources.rename_columns(
-        ["drift_yag_actual", "drift_zag_actual"],
-        ["drift_yag_residual", "drift_zag_residual"],
     )
 
     source_tables = []
@@ -161,37 +146,41 @@ def write_html_report(
     outdir = Path(outdir)
     outdir.mkdir(exist_ok=True, parents=True)
 
-    # this string is used in the template to link to the source report
-    # it should match what is done below for src_file
+    # This is a javascript format string that, when interpolated, will give the relative path
+    # from the main report page to the source report. It is used to generate links from a plotly
+    # scatter plot which has obsid and src_id values. It needs to be a JS format string because the
+    # interpolation is done in the onClick method.
+    #
+    # This string should match the src_file value passed to write_source_html_report.
+    #
+    # Note that we keep track of this relative path for all sources in the sources table.
+    # This is used to generate files like sources/all.json that can be used to navigate
+    # between source reports.
     source_report_path = (
         "`sources/${String(Math.floor(Number(obsid) / 1e3)).padStart(2, '0')}"
         "/${obsid}/${src_id}/index.html`"
     )
 
-    # astromon excluded regions can change at any time, and cache data might not reflect that,
-    # so we determine whether sources are excluded when writing the report
-    excluded = is_in_excluded_region(
-        SkyCoord(sources["ra"] * u.deg, sources["dec"] * u.deg), sources["obsid"]
-    )
-    sources = sources[~excluded]
-
     context = {"source_report_path": source_report_path}
 
     # the sources
     source_files = []
+    if show_progress:
+        # this is a print statement because that is where the tqdm progress bar goes
+        print("Writing source reports...")
     src_iter = tqdm(sources["obsid", "id"]) if show_progress else sources["obsid", "id"]
     for obsid, src_id in src_iter:
         obs = observations[str(obsid)]
         src_file = (
-            Path("sources")
+            outdir
+            / "sources"
             / f"{float(obsid) // 1e3:02.0f}"
             / f"{obsid}"
             / str(src_id)
             / "index.html"
         )
-        src_file.parent.mkdir(exist_ok=True, parents=True)
-        write_source_html_report(obs, src_id, outdir / src_file, overwrite=overwrite)
-        source_files.append(str(src_file))
+        write_source_html_report(obs, src_id, src_file.as_posix(), overwrite=overwrite)
+        source_files.append(src_file.relative_to(outdir).as_posix())
 
     sources["filename"] = source_files
 
@@ -237,7 +226,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     }
     template = JINJA_ENV.get_template("source_report.html")
 
-    source = plots.get_source_figure(src_pdd)
+    source = plots.get_source_figure(obs, src_id)
     source.update_layout({"margin": {"l": 0, "r": 0, "b": 0, "t": 0}})
 
     summary = src_pdd.summary
@@ -247,15 +236,15 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
             "yag_slope": summary["OOBAGRD_pc1_yag_slope"],
             "yag_slope_err": summary["OOBAGRD_pc1_yag_slope_err"],
             "zag_slope": summary["OOBAGRD_pc1_zag_slope"],
-            "zag_slope_err": summary["OOBAGRD_pc1_yag_slope_err"],
+            "zag_slope_err": summary["OOBAGRD_pc1_zag_slope_err"],
             "yag_null_chi2": summary["OOBAGRD_pc1_yag_null_chi2_corr"],
             "yag_ndf": summary["OOBAGRD_pc1_yag_ndf"],
             "zag_null_chi2": summary["OOBAGRD_pc1_zag_null_chi2_corr"],
             "zag_ndf": summary["OOBAGRD_pc1_zag_ndf"],
-            "drift_yag_expected": summary["drift_yag_expected"],
-            "drift_zag_expected": summary["drift_zag_expected"],
-            "drift_yag_residual": summary["drift_yag_actual"],
-            "drift_zag_residual": summary["drift_zag_actual"],
+            "drift_expected_yag": summary["drift_expected_yag"],
+            "drift_expected_zag": summary["drift_expected_zag"],
+            "drift_residual_yag": summary["drift_residual_yag"],
+            "drift_residual_zag": summary["drift_residual_zag"],
             "yag_null_p_value_corr": summary["OOBAGRD_pc1_yag_null_p_value_corr"],
             "zag_null_p_value_corr": summary["OOBAGRD_pc1_zag_null_p_value_corr"],
         }
@@ -263,7 +252,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     try:
         abstract = get_proposal_abstract(obs.obsid)
     except Exception as exc:
-        if str(exc).startswith("got error 404"):
+        if str(exc).startswith("got error 404") or str(exc).startswith("got error 503"):
             abstract = ""
         else:
             raise
@@ -276,7 +265,7 @@ def write_source_html_report(obs, src_id, filename, overwrite=False):
     page = template.render(
         source=src_pdd.source,
         metrics=metrics,
-        source_figure=source.to_html(config={"displayModeBar": False}, **kwargs),
+        source_figure=source.to_html(**kwargs),
         scatter_plot=plots.get_scatter_plot_figure(src_pdd).to_html(**kwargs),
         scatter_vs_gradients=plots.get_scatter_versus_gradients_figure(src_pdd).to_html(
             **kwargs
@@ -303,6 +292,7 @@ def write_report(
     sources=None,
     report_observations=None,
     archive_dir=None,
+    astromon_archive_dir=None,
     workdir=None,
     overwrite=False,
     show_progress=False,
@@ -326,7 +316,10 @@ def write_report(
         (default), observations are created as needed.
     archive_dir : str or Path, optional
         Path to the archive directory. If None (default), the value of the
-        asreomon archive on $SKA/data is used.
+        periscope_drift archive on $SKA/data is used.
+    astromon_archive_dir : str or Path, optional
+        Path to the archive directory. If None (default), the value of the
+        astromon archive on $SKA/data is used.
     workdir : str or Path, optional
         Path to the work directory. If None (default), a temp directory is used.
     """
@@ -351,10 +344,24 @@ def write_report(
             np.in1d(sources["obsid"], processing.get_obsids(start, stop))
         ]
 
+        # select only sources that are selected according to fixed criteria
+        selected = observation.PeriscopeDriftData.is_selected_source(
+            report_sources, exclude_regions=True
+        )
+        selected &= report_sources["n_points"] > 2
+
+        report_sources = report_sources[selected]
+    else:
+        report_sources = sources
+
     if report_observations is None:
         report_observations = {
             str(obsid): observation.Observation(
-                obsid, workdir=workdir, archive_dir=archive_dir
+                obsid,
+                workdir=workdir,
+                archive_dir=archive_dir,
+                astromon_workdir=workdir,
+                astromon_archive_dir=astromon_archive_dir,
             )
             for obsid in np.unique(report_sources["obsid"])
         }
@@ -374,6 +381,7 @@ def write_report(
             "stop": stop,
             "output_dir": output_dir,
             "archive_dir": archive_dir,
+            "astromon_archive_dir": astromon_archive_dir,
             "workdir": workdir,
             "overwrite": False,
         }

@@ -23,12 +23,18 @@ def get_parser():
         "--output",
         default=Path(os.environ["SKA"]) / "www" / "ASPECT" / "periscope_drift",
         type=Path,
-        help="Output directory",
+        help="Report output directory. Default: $SKA/www/ASPECT/periscope_drift",
     )
-    parser.add_argument("--start", default="-60d", help="Start of processing interval")
+    parser.add_argument(
+        "--start",
+        default="-60d",
+        help="Start of processing interval. Default: NOW - 60d",
+    )
     parser.add_argument("--stop", default=None)
     parser.add_argument(
-        "--start-report", default="-1825d", help="Start of report interval"
+        "--start-report",
+        default="-1825d",
+        help="Start of report interval. Default: NOW - 1825d (5 years ago)",
     )
     parser.add_argument(
         "--workdir",
@@ -36,10 +42,19 @@ def get_parser():
         help="Working directory (the default is a temporary directory)",
     )
     parser.add_argument(
-        "--archive-dir",
-        default=Path(os.environ["SKA"]) / "data" / "astromon" / "archive",
+        "--astromon-archive-dir",
+        default=Path(os.environ["SKA"]) / "data" / "astromon" / "xray_observations",
         type=Path,
-        help="Astromon archive directory",
+        help="Astromon archive directory. Default: $SKA/data/astromon/xray_observations",
+    )
+    parser.add_argument(
+        "--archive-dir",
+        default=Path(os.environ["SKA"])
+        / "data"
+        / "periscope_drift"
+        / "xray_observations",
+        type=Path,
+        help="Astromon archive directory. Default: $SKA/data/periscope_drift/xray_observations",
     )
     parser.add_argument(
         "--log-level",
@@ -56,7 +71,7 @@ def get_parser():
             "error",
             "critical",
         ],
-        help="Verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+        help="Verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: DEBUG.",
     )
     parser.add_argument(
         "--log-file",
@@ -111,6 +126,7 @@ def main():
         start_process,
         stop,
         archive_dir=args.archive_dir,
+        astromon_archive_dir=args.astromon_archive_dir,
         workdir=args.workdir,
         log_level=args.log_level.upper(),
         show_progress=args.show_progress,
@@ -126,7 +142,9 @@ def main():
             stop=stop,
             output_dir=args.output,
             archive_dir=args.archive_dir,
+            astromon_archive_dir=args.astromon_archive_dir,
             workdir=args.workdir,
+            show_progress=args.show_progress,
         )
 
         with open(args.output / "errors.json", "w") as fh:
