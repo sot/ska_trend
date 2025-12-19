@@ -34,7 +34,7 @@ def get_parser():
     parser.add_argument(
         "--start-report",
         default="-1825d",
-        help="Start of report interval. Default: NOW - 1825d (5 years ago)"
+        help="Start of report interval. Default: NOW - 1825d (5 years ago)",
     )
     parser.add_argument(
         "--workdir",

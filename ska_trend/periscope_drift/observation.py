@@ -42,9 +42,7 @@ from ska_trend.periscope_drift.correction import (
 logger = logging.getLogger("periscope_drift")
 
 
-ARCHIVE_DIR = (
-    Path(os.environ["SKA"]) / "data" / "periscope_drift" / "xray_observations"
-)
+ARCHIVE_DIR = Path(os.environ["SKA"]) / "data" / "periscope_drift" / "xray_observations"
 
 
 EXCLUDED_SOURCES_FILE = (

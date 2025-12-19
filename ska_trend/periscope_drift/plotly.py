@@ -1121,15 +1121,17 @@ def get_scatter_plot_figure(src_pdd):
     fig.add_traces([smooth_line_yag], rows=1, cols=1)
     fig.add_traces([smooth_line_zag], rows=2, cols=1)
 
-    fig.update_layout({
-        "legend": {
-            "orientation": "h",
-            "x": 0.5,
-            "y": 1.05,
-            "xanchor": "center", # Anchor the right side of the legend box to the x coordinate
-            "yanchor": "bottom",   # Anchor the top side of the legend box to the y coordinate
+    fig.update_layout(
+        {
+            "legend": {
+                "orientation": "h",
+                "x": 0.5,
+                "y": 1.05,
+                "xanchor": "center",  # Anchor the right side of the legend box to the x coordinate
+                "yanchor": "bottom",  # Anchor the top side of the legend box to the y coordinate
+            }
         }
-    })
+    )
 
     return fig
 
@@ -1613,7 +1615,7 @@ def get_source_figure(obs, source_id):
             }
         ),
         row=2,
-        col=1
+        col=1,
     )
 
     # fit ellipse
@@ -1649,26 +1651,34 @@ def get_source_figure(obs, source_id):
     d_angle = max(source["sigma_y_angle"], source["sigma_z_angle"]) * 5
 
     # fix other things in layout (legend, titles, ranges)
-    fig.update_layout({
-        "xaxis3": {
-            "range": [source["y_angle"] - d_angle / 2, source["y_angle"] + d_angle / 2],
-            "title": "yag (arcsec)",
-        },
-        "yaxis3": {
-            "range": [source["z_angle"] - d_angle / 2, source["z_angle"] + d_angle / 2],
-            "title": "zag (arcsec)",
-        },
-        "yaxis": {
-            "range": [0., max(np.max(yag_model)*1.1, np.max(zag_model)*1.1)]
-        },
-        "legend": {
-            "orientation": "h",
-            "x": 0.5,
-            "y": 0.9,
-            "xanchor": "center", # Anchor the right side of the legend box to the x coordinate
-            "yanchor": "top",   # Anchor the top side of the legend box to the y coordinate
+    fig.update_layout(
+        {
+            "xaxis3": {
+                "range": [
+                    source["y_angle"] - d_angle / 2,
+                    source["y_angle"] + d_angle / 2,
+                ],
+                "title": "yag (arcsec)",
+            },
+            "yaxis3": {
+                "range": [
+                    source["z_angle"] - d_angle / 2,
+                    source["z_angle"] + d_angle / 2,
+                ],
+                "title": "zag (arcsec)",
+            },
+            "yaxis": {
+                "range": [0.0, max(np.max(yag_model) * 1.1, np.max(zag_model) * 1.1)]
+            },
+            "legend": {
+                "orientation": "h",
+                "x": 0.5,
+                "y": 0.9,
+                "xanchor": "center",  # Anchor the right side of the legend box to the x coordinate
+                "yanchor": "top",  # Anchor the top side of the legend box to the y coordinate
+            },
         }
-    })
+    )
 
     return fig
 
