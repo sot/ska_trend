@@ -21,17 +21,20 @@ def get_options():
         description="Update VV/Aspect Solution resid plots"
     )
     parser.add_argument("--outdir", default=".", help="directory for plots")
+    parser.add_argument("--start", type=str, default=None, help="start date for data")
     return parser
 
 
-def mission_plots(rms_data):  # noqa: PLR0915 Too many statements
+def mission_plots(rms_data, start="2015:001"):  # noqa: PLR0915 Too many statements
+    start = CxoTime(start)
+
     norm = mpl.colors.LogNorm()
     my_cm = cm.jet
     figsize = (6, 4)
     data = rms_data
     reasonable = (data["dz_rms"] > 0) & (data["dz_rms"] < 1)
     last_year = data["tstart"] > (CxoTime.now() - 365 * u.day).secs
-    since_2015 = data["tstart"] > CxoTime("2015:001").secs
+    recent = data["tstart"] > start.secs
 
     mag_resid_fig = plt.figure(figsize=figsize)
     year_2007 = (data["tstart"] < CxoTime("2008:001").secs) & (
@@ -69,10 +72,10 @@ def mission_plots(rms_data):  # noqa: PLR0915 Too many statements
 
     hist2d_fig = plt.figure(figsize=figsize)
     H, xedges, yedges = np.histogram2d(
-        CxoTime(data[reasonable & since_2015]["tstart"]).frac_year,
-        data[reasonable & since_2015]["dz_rms"],
+        CxoTime(data[reasonable & recent]["tstart"]).frac_year,
+        data[reasonable & recent]["dz_rms"],
         bins=150,
-        range=[[2015, CxoTime.now().frac_year + 0.25], [0, 0.35]],
+        range=[[start.frac_year, CxoTime.now().frac_year + 0.10], [0, 0.35]],
     )
     # ax1 = hist2d_fig.add_axes([0.125, 0.12, 0.70, 0.78])
     ax1 = hist2d_fig.add_axes([0.14, 0.14, 0.70, 0.78])
@@ -80,30 +83,35 @@ def mission_plots(rms_data):  # noqa: PLR0915 Too many statements
     ax1.pcolorfast(xedges, yedges, H.T, cmap=my_cm, norm=norm)
     plt.grid()
     plt.ylim(-0.045, 0.35)
-    plt.vlines(CxoTime("2018:292").frac_year, -0.045, 0.35)
-    plt.annotate(
-        "Mixed IRU",
-        (CxoTime("2018:292").frac_year - 0.175, -0.04),
-        rotation=90,
-        fontsize=8,
-    )
-    plt.vlines(CxoTime("2020:213").frac_year, -0.045, 0.35)
-    plt.annotate(
-        "Single IRU",
-        (CxoTime("2020:213").frac_year - 0.175, -0.04),
-        rotation=90,
-        fontsize=8,
-    )
-    smode_date = CxoTime("2022:294").frac_year
-    plt.vlines(smode_date, -0.045, 0.35)
-    plt.annotate("Safe Mode", (smode_date - 0.175, -0.04), rotation=90, fontsize=8)
-    smode_date = CxoTime("2023:044").frac_year
-    plt.vlines(smode_date, -0.045, 0.35)
-    plt.annotate("Safe Mode", (smode_date - 0.175, -0.04), rotation=90, fontsize=8)
+
+    if start.date < "2018:292":
+        plt.vlines(CxoTime("2018:292").frac_year, -0.045, 0.35)
+        plt.annotate(
+            "Mixed IRU",
+            (CxoTime("2018:292").frac_year - 0.175, -0.04),
+            rotation=90,
+            fontsize=8,
+        )
+    if start.date < "2020:213":
+        plt.vlines(CxoTime("2020:213").frac_year, -0.045, 0.35)
+        plt.annotate(
+            "Single IRU",
+            (CxoTime("2020:213").frac_year - 0.175, -0.04),
+            rotation=90,
+            fontsize=8,
+        )
+    if start.date < "2022:294":
+        smode_date = CxoTime("2022:294").frac_year
+        plt.vlines(smode_date, -0.045, 0.35)
+        plt.annotate("Safe Mode", (smode_date - 0.175, -0.04), rotation=90, fontsize=8)
+    if start.date < "2023:044":
+        smode_date = CxoTime("2023:044").frac_year
+        plt.vlines(smode_date, -0.045, 0.35)
+        plt.annotate("Safe Mode", (smode_date - 0.175, -0.04), rotation=90, fontsize=8)
 
     plt.ylabel("Star Resid RMS in Z (arcsec)")
     plt.suptitle("RMS vs Time")
-    plt.xticks(rotation=60)
+    plt.xticks(rotation=50)
     ax1.xaxis.set_major_formatter(mpl.ticker.FormatStrFormatter("%d"))
 
     ax2 = hist2d_fig.add_axes([0.85, 0.14, 0.015, 0.78])
@@ -117,15 +125,15 @@ def mission_plots(rms_data):  # noqa: PLR0915 Too many statements
     # plot rms vs warm fraction
     hist2d_fig_n100 = plt.figure(figsize=figsize)
     H, xedges, yedges = np.histogram2d(
-        data[reasonable & since_2015]["n100_frac"],
-        data[reasonable & since_2015]["dz_rms"],
+        data[reasonable & recent]["n100_frac"],
+        data[reasonable & recent]["dz_rms"],
         bins=100,
         range=[[0.01, np.max(data[reasonable]["n100_frac"])], [0.0, 0.35]],
     )
     ax1n = hist2d_fig_n100.add_axes([0.14, 0.14, 0.70, 0.78])
     ax1n.pcolorfast(xedges, yedges, H.T, cmap=my_cm, norm=norm)
     plt.ylim(-0.04, 0.35)
-    plt.grid()
+    plt.grid(True)
     plt.ylabel("Star Resid RMS in Z (arcsec)")
     plt.xlabel("N100 frac")
     plt.suptitle("RMS vs N100 frac")
@@ -161,6 +169,8 @@ def main(args=None):
     # And filter to only plot "used" star slots
     rms_data = rms_data[(rms_data["used"] == 1) & (rms_data["type"] != "FID")]
 
+    start = CxoTime(opt.start) if opt.start else CxoTime("2015:001")
+
     # Lookup the n100 warm fraction for each slot
     # This doesn't take long enough to be worth optimizing (to do the lookups via obsid
     # or save out the values to another table or the like)
@@ -171,7 +181,7 @@ def main(args=None):
     rms_data = Table(rms_data)
     rms_data["n100_frac"] = np.array(warm_frac)
 
-    figures = mission_plots(rms_data)
+    figures = mission_plots(rms_data, start=start)
     for fig in figures:
         plt.figure(figures[fig].number)
         plt.savefig(outdir / f"{fig}.png")
