@@ -15,12 +15,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from cxotime import CxoTime
 from ska_helpers.logging import basic_logger
 
 logger = basic_logger("check_continuity")
 
 
-def get_opt():
+def get_opt() -> argparse.ArgumentParser:
     """Get command line options."""
     parser = argparse.ArgumentParser(
         description="Check continuity of centroid dashboard observation chains"
@@ -29,6 +30,12 @@ def get_opt():
         "--data-root",
         default="reports",
         help="Root directory for data files (default=reports)",
+    )
+    parser.add_argument(
+        "--stop",
+        default=None,
+        type=str,
+        help="Process observations before stop date",
     )
     parser.add_argument(
         "--log-level", default="INFO", help="Logging level (default=INFO)"
@@ -58,6 +65,7 @@ class ContinuityChecker:
     """Check continuity of observation chains in centroid dashboard reports."""
 
     reports_root: Path
+    stop_date: Optional[str] = None
     observations: List[ObservationInfo] = field(default_factory=list)
     obs_by_key: Dict[Tuple[int, str], ObservationInfo] = field(default_factory=dict)
 
@@ -66,6 +74,8 @@ class ContinuityChecker:
         if not self.reports_root.exists():
             logger.error(f"Reports directory not found: {self.reports_root}")
             return
+
+        stop_date = CxoTime(self.stop_date) if self.stop_date else None
 
         logger.info(f"Scanning observations in {self.reports_root}")
 
@@ -86,7 +96,7 @@ class ContinuityChecker:
                 if not source_dir.is_dir():
                     continue
 
-                logger.info(f"Checking {source_dir.name}")
+                logger.debug(f"Checking {source_dir.name}")
 
                 for obsid_dir in source_dir.iterdir():
                     if not obsid_dir.is_dir():
@@ -100,6 +110,9 @@ class ContinuityChecker:
                     try:
                         with open(info_json_path) as f:
                             info_data = json.load(f)
+
+                        if stop_date and info_data["date_starcat"] > stop_date:
+                            continue
 
                         obs_info = ObservationInfo(
                             obsid=info_data["obsid"],
@@ -137,7 +150,7 @@ class ContinuityChecker:
 
         # Start from the most recent observation
         current_obs = self.observations[-1]
-        visited_keys = set()
+        visited_keys = {}
         chain_count = 0
 
         logger.info(f"Starting continuity check from most recent: {current_obs}")
@@ -148,10 +161,13 @@ class ContinuityChecker:
             if obs_key in visited_keys:
                 return (
                     False,
-                    f"Cycle detected at obsid {current_obs.obsid} (source {current_obs.source})",
+                    f" Cycle detected at obsid {current_obs.obsid} {current_obs.date_starcat} "
+                    f"(source {current_obs.source})\n"
+                    f" Current obs date_starcat: {current_obs.date_starcat}, "
+                    f"previously visited at date_starcat: {visited_keys[obs_key]}",
                 )
 
-            visited_keys.add(obs_key)
+            visited_keys[obs_key] = current_obs.date_starcat
             chain_count += 1
 
             # Get previous observation from links
@@ -178,15 +194,17 @@ class ContinuityChecker:
 
                 if found_dir:
                     return False, (
-                        f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) "
-                        f"links to incomplete obsid {prev_obsid} (source {prev_source}) - "
-                        f"directory exists but no info.json"
+                        f" Broken link: obsid {current_obs.obsid} {current_obs.date_starcat} "
+                        f"(source {current_obs.source})\n"
+                        f" links to incomplete obsid {prev_obsid} (source {prev_source})\n"
+                        f" Directory exists but no info.json"
                     )
                 else:
                     return False, (
-                        f"Broken link: obsid {current_obs.obsid} (source {current_obs.source}) "
-                        f"links to missing obsid {prev_obsid} (source {prev_source}) - "
-                        f"directory does not exist"
+                        f" Broken link: obsid {current_obs.obsid} {current_obs.date_starcat} "
+                        f"(source {current_obs.source})\n"
+                        f" links to missing obsid {prev_obsid} (source {prev_source})\n"
+                        f" Directory does not exist"
                     )
 
             current_obs = self.obs_by_key[prev_key]
@@ -235,7 +253,7 @@ class ContinuityChecker:
                 f"all properly linked"
             )
         else:
-            logger.error(f"✗ Observation chain continuity check FAILED: {error_msg}")
+            logger.error(f"✗ Observation chain continuity check FAILED:\n{error_msg}")
             logger.info(
                 f"Summary: {len(self.observations)} observations from 4-digit years, "
                 f"broken chain detected"
@@ -251,7 +269,7 @@ def main():
 
     logger.setLevel(opt.log_level)
 
-    checker = ContinuityChecker(Path(opt.data_root))
+    checker = ContinuityChecker(Path(opt.data_root), opt.stop)
     success = checker.run_check()
 
     if not success:
