@@ -34,6 +34,8 @@ from ska_helpers.logging import basic_logger
 from ska_matplotlib import plot_cxctime
 from starcheck.state_checks import calc_man_angle_for_duration
 
+kc.conf.include_in_work_command_events = True
+
 if TYPE_CHECKING:
     from proseco.catalog import ACATable
 
@@ -501,8 +503,8 @@ class Observation(razl.observations.Observation):
                 return False
 
         info = json.loads(self.path.info_json.read_text())
-        # Check that info has a few key fields. Any processing exception will delete the
-        # info.json file.
+        # Check that info has a few key fields that indicate processing is done, in
+        # particular the att_stats field.
         out = (
             info["kalman_start"]
             and info["obs_links"]["next"]
@@ -1392,10 +1394,10 @@ def main(args=None):
         except SkipObservation as err:
             try:
                 write_index_html(obs, index_html_path, traceback=str(err))
+                write_info_json(obs, info_json_path)
             except Exception as err:
                 tb = traceback.format_exc()
                 logger.error(f"Error making traceback HTML for {obs.obsid}:\n{tb}")
-            obs.path.info_json.unlink(missing_ok=True)
 
         except Exception as err:
             if opt.raise_exc:
@@ -1408,11 +1410,9 @@ def main(args=None):
                 # This SHOULD always work to preserve navigation and the traceback, but
                 # if it fails we'll just have to live with it.
                 write_index_html(obs, index_html_path, traceback=tb)
+                write_info_json(obs, info_json_path)
             except Exception as err:
                 logger.error(f"Error making traceback HTML for {obs.obsid}: {err}")
-
-            # Just in case, remove info file so observation is reprocessed next time.
-            info_json_path.unlink(missing_ok=True)
 
         logger.info("")
 
