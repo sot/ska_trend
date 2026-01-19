@@ -538,53 +538,60 @@ def get_gnd_atts(
     tuple
         Tuple of ground attitude quaternions (Nx4) and times (N).
     """
+    try:
+        atts, atts_times, _ = asp_l1.get_atts(obsid=obsid)
+    except FileNotFoundError:
+        pass
+    else:
+        if len(atts_times) > 0:
+            return atts, atts_times
+
     obsid_str = f"{obsid:05d}"
     obs2_dir = f"data/mica/archive/asp1/{obsid_str[:2]}"
     obs2_dir_local = SKA / obs2_dir
     obsid_dir_remote = f"kady:/proj/sot/ska/{obs2_dir}/{obsid_str}*"
     obsid_dir_local = obs2_dir_local / obsid_str
 
-    if not obsid_dir_local.exists():
-        if not remote_copy:
-            return [], []
+    if not remote_copy:
+        return [], []
 
-        # Get a limited copy of the aspect solution data from the remote archive. This
-        # is custom to this application because it only keeps two columns of the ASOL
-        # file for disk space considerations.
-        obs2_dir_local.mkdir(parents=True, exist_ok=True)
-        cmds = [
-            "rsync",
-            "-av",
-            # Ignore files like pcadf30109_001N001_asol1.fits.gz
-            "--include=pcadf[0-9][0-9][0-9][0-9][0-9][0-9]*_asol1.fits.gz",
-            "--include=pcadf*_acal1.fits.gz",
-            "--include=pcadf*_aqual1.fits.gz",
-            f"--include={obsid_str}",
-            f"--include={obsid_str}_v*",
-            "--exclude=*",
-            obsid_dir_remote,
-            f"{obs2_dir_local}/",
-        ]
-        logger.info(f"Copying remote data with command: {' '.join(cmds)}")
-        completed_process = subprocess.run(cmds, check=False)
-        if completed_process.returncode != 0:
-            logger.warning("Could not copy remote aspect solution data")
-            return [], []
+    # Get a limited copy of the aspect solution data from the remote archive. This
+    # is custom to this application because it only keeps two columns of the ASOL
+    # file for disk space considerations.
+    obs2_dir_local.mkdir(parents=True, exist_ok=True)
+    cmds = [
+        "rsync",
+        "-av",
+        # Ignore files like pcadf30109_001N001_asol1.fits.gz
+        "--include=pcadf[0-9][0-9][0-9][0-9][0-9][0-9]*_asol1.fits.gz",
+        "--include=pcadf*_acal1.fits.gz",
+        "--include=pcadf*_aqual1.fits.gz",
+        f"--include={obsid_str}",
+        f"--include={obsid_str}_v*",
+        "--exclude=*",
+        obsid_dir_remote,
+        f"{obs2_dir_local}/",
+    ]
+    logger.info(f"Copying remote data with command: {' '.join(cmds)}")
+    completed_process = subprocess.run(cmds, check=False)
+    if completed_process.returncode != 0:
+        logger.warning("Could not copy remote aspect solution data")
+        return [], []
 
-        for path in obsid_dir_local.glob("*_asol1.fits.gz"):
-            logger.info(
-                f"Overwriting existing file {path} with only time, q_att_raw cols"
-            )
-            dat = Table.read(path)
-            dat = dat["time", "q_att_raw"]
-            dat.write(path, overwrite=True)
+    for path in obsid_dir_local.glob("*_asol1.fits.gz"):
+        logger.info(
+            f"Overwriting existing file {path} with only time, q_att_raw cols"
+        )
+        dat = Table.read(path)
+        dat = dat["time", "q_att_raw"]
+        dat.write(path, overwrite=True)
 
-        obsid_dir_resolve = obsid_dir_local.resolve().name
-        for path in obs2_dir_local.glob(f"{obsid_str}_v*"):
-            if path.name != obsid_dir_resolve:
-                # Remove that directory
-                logger.info(f"Removing directory {path}")
-                shutil.rmtree(path)
+    obsid_dir_resolve = obsid_dir_local.resolve().name
+    for path in obs2_dir_local.glob(f"{obsid_str}_v*"):
+        if path.name != obsid_dir_resolve:
+            # Remove that directory
+            logger.info(f"Removing directory {path}")
+            shutil.rmtree(path)
 
     raise_sporadic_exc_for_testing()
     atts, atts_times, _ = asp_l1.get_atts(obsid=obsid)
