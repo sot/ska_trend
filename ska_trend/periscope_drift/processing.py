@@ -414,7 +414,7 @@ def update_sources(sources, obsids, filename=None):
     if filename.exists():
         # if the file exists, replace the entries with the newly processed ones
         prev_sources = get_sources(filename)
-        prev_sources = prev_sources[~np.in1d(prev_sources["obsid"], obsids)]
+        prev_sources = prev_sources[~np.isin(prev_sources["obsid"], obsids)]
         if not sources or len(sources) == 0:
             all_sources = prev_sources
         else:
