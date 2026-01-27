@@ -393,7 +393,12 @@ def get_sources(filename=None):
     filename = SOURCES_FILE if filename is None else filename
     if not filename.exists():
         raise FileNotFoundError(f"Sources file {filename} not found")
-    return Table.read(filename)
+    # if the file is in fits format, the byte order will always be big-endian,
+    # whereas OSX systems are little-endian. Later on, one creates plotly figures
+    # and often calls `.to_html()` on them, which fails if the byte order is not native.
+    # instead of trying to fix the byte order in various places, we just convert it here
+    # by calling `as_array()`
+    return Table(Table.read(filename).as_array())
 
 
 def update_sources(sources, obsids, filename=None):
