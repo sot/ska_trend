@@ -341,7 +341,7 @@ def write_report(
         sources = processing.get_sources()
 
         report_sources = sources[
-            np.in1d(sources["obsid"], processing.get_obsids(start, stop))
+            np.isin(sources["obsid"], processing.get_obsids(start, stop))
         ]
 
         # select only sources that are selected according to fixed criteria
