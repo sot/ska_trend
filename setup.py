@@ -6,6 +6,7 @@ entry_points = {
         "ska_trend_wrong_box_updates=ska_trend.wrong_box_anom.wrong_box_anom:main",
         "ska_trend_bad_periscope=ska_trend.bad_periscope_gradient.periscope_update:main",
         "ska_trend_centroid_dashboard=ska_trend.centroid_dashboard.app:main",
+        "ska_trend_centroid_dashboard_check_continuity=ska_trend.centroid_dashboard.check_continuity:main",
         "ska_trend_fid_drop_mon_update=ska_trend.fid_drop_mon.update:main",
         "ska_trend_periscope_drift=ska_trend.periscope_drift.scripts.periscope_drift_reports:main",
         "ska_trend_periscope_drift_regions=ska_trend.periscope_drift.scripts.periscope_drift_regions:main",
