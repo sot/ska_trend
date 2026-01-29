@@ -34,8 +34,6 @@ from ska_helpers.logging import basic_logger
 from ska_matplotlib import plot_cxctime
 from starcheck.state_checks import calc_man_angle_for_duration
 
-kc.conf.include_in_work_command_events = True
-
 if TYPE_CHECKING:
     from proseco.catalog import ACATable
 
