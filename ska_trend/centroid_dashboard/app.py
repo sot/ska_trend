@@ -581,9 +581,7 @@ def get_gnd_atts(
         return [], []
 
     for path in obsid_dir_local.glob("*_asol1.fits.gz"):
-        logger.info(
-            f"Overwriting existing file {path} with only time, q_att_raw cols"
-        )
+        logger.info(f"Overwriting existing file {path} with only time, q_att_raw cols")
         dat = Table.read(path)
         dat = dat["time", "q_att_raw"]
         dat.write(path, overwrite=True)

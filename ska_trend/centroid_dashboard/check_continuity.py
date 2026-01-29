@@ -253,7 +253,9 @@ class ContinuityChecker:
                 f"all properly linked"
             )
         else:
-            logger.error(f"✗ ERROR: Observation chain continuity check FAILED:\n{error_msg}")
+            logger.error(
+                f"✗ ERROR: Observation chain continuity check FAILED:\n{error_msg}"
+            )
             logger.info(
                 f"Summary: {len(self.observations)} observations from 4-digit years, "
                 f"broken chain detected"
