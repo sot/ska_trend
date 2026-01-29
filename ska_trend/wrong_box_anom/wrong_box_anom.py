@@ -187,7 +187,7 @@ def get_anom_acq_obs(start="2010:001"):
     anom_match = wrong_box(acqs)
     anom_obsids = np.unique(acqs[anom_match]["obsid"])
     # Reduce the data set to just obsids with anomalous acqs
-    return Table(acqs[np.in1d(acqs["obsid"], anom_obsids)])
+    return Table(acqs[np.isin(acqs["obsid"], anom_obsids)])
 
 
 def get_anom_info(anom_row, acqs):
