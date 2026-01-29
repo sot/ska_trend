@@ -817,6 +817,7 @@ def get_centroid_resids(
     if crs := get_centroid_resids_from_file(crs_path):
         return crs
 
+    logger.info("Computing centroid residuals from telemetry")
     crs = {}
     cr = CentroidResiduals(start, stop)
 
