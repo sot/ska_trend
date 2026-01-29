@@ -754,7 +754,7 @@ def write_index_html(obs: Observation, save_path: Path, traceback=None):
 
 
 def get_centroid_resids_from_file(
-    crs_path: Path,
+    crs_path: str | Path,
 ) -> dict[int, CentroidResidualsLite] | None:
     """Get centroid residuals from the file.
 
@@ -762,7 +762,7 @@ def get_centroid_resids_from_file(
 
     Parameters
     ----------
-    crs_path : Path
+    crs_path : str | Path
         Path to the centroid residuals file.
 
     Returns
@@ -771,6 +771,9 @@ def get_centroid_resids_from_file(
         Dictionary of CentroidResidualsLite objects keyed by slot, or None if the file
         does not exist.
     """
+    if not isinstance(crs_path, Path):
+        crs_path = Path(crs_path)
+
     if not crs_path.exists():
         return None
 
@@ -781,6 +784,8 @@ def get_centroid_resids_from_file(
         times = np.linspace(val["tstart"], val["tstop"], val["n_times"])
         cr = CentroidResidualsLite(val["dyags"], val["dzags"], times, times)
         out[slot] = cr
+
+    return out
 
 
 def get_centroid_resids(
@@ -817,6 +822,7 @@ def get_centroid_resids(
     if crs := get_centroid_resids_from_file(crs_path):
         return crs
 
+    logger.info("Computing centroid residuals from telemetry")
     crs = {}
     cr = CentroidResiduals(start, stop)
 
