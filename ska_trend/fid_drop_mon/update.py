@@ -111,7 +111,7 @@ def get_vehicle_only_intervals(
     cmds_rmpds_evt = cmds[ok]
     ok2 = cmds_rmpds_evt["event"] == "SCS-107"
     cmd_dates_scs107 = [cmd["date"] for cmd in cmds_rmpds_evt[ok2]]
-    cmd_dates_sci = cmds["date"][np.in1d(cmds["scs"], [131, 132, 133])]
+    cmd_dates_sci = cmds["date"][np.isin(cmds["scs"], [131, 132, 133])]
 
     # Manually add some SCS107s before cmd event sheet
     scs107_dates = [
