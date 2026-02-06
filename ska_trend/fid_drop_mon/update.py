@@ -111,7 +111,7 @@ def get_vehicle_only_intervals(
     cmds_rmpds_evt = cmds[ok]
     ok2 = cmds_rmpds_evt["event"] == "SCS-107"
     cmd_dates_scs107 = [cmd["date"] for cmd in cmds_rmpds_evt[ok2]]
-    cmd_dates_sci = cmds["date"][np.in1d(cmds["scs"], [131, 132, 133])]
+    cmd_dates_sci = cmds["date"][np.isin(cmds["scs"], [131, 132, 133])]
 
     # Manually add some SCS107s before cmd event sheet
     scs107_dates = [
@@ -156,14 +156,17 @@ def get_vehicle_only_intervals(
             }
         )
 
-    # Convert to astropy table
-    scs107_intervals = Table(scs107_intervals)
+    if len(scs107_intervals) > 0:
+        # Convert to astropy table
+        scs107_intervals = Table(scs107_intervals)
 
-    # Filter to keep only those that overlap with the supplied start stop times
-    ok = (CxoTime(scs107_intervals["datestart"]) <= stop) & (
-        CxoTime(scs107_intervals["datestop"]) >= start
-    )
-    return scs107_intervals[ok]
+        # Filter to keep only those that overlap with the supplied start stop times
+        ok = (CxoTime(scs107_intervals["datestart"]) <= stop) & (
+            CxoTime(scs107_intervals["datestop"]) >= start
+        )
+        return scs107_intervals[ok]
+    else:
+        return Table(dtype=[("datestart", "O"), ("datestop", "O")])
 
 
 def get_fid_data(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
