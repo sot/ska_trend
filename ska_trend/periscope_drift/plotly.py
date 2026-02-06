@@ -80,7 +80,7 @@ def plot_sources(periscope_drift_data, ids=None):
     """
     ids = periscope_drift_data.sources["id"] if ids is None else ids
     src = periscope_drift_data.sources
-    src = src[np.in1d(src["id"], ids)]
+    src = src[np.isin(src["id"], ids)]
 
     n_x = 6
     n_y = len(src) // n_x + int(len(src) % n_x > 0)
