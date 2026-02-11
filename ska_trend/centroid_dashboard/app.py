@@ -299,9 +299,7 @@ class Observation(razl.observations.Observation):
         for attr in attrs + date_attrs:
             try:
                 val = getattr(self, attr)
-                if attr in date_attrs:
-                    val = val.date
-                out[attr] = val
+                out[attr] = val.date if attr in date_attrs else val
             except Exception:
                 logger.info(f"could not get attribute {attr} for obsid {self.obsid}")
         return out
