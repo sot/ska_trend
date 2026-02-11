@@ -279,6 +279,12 @@ class Observation(razl.observations.Observation):
 
     @functools.cached_property
     def info(self) -> str:
+        """Get key attributes for the info file.
+
+        For observations that are not yet complete, these attributes may not be fully
+        complete. This is common if the maneuver event is not yet available in
+        telemetry, which is used to get the kalman_start and kalman_stop times.
+        """
         attrs = [
             "obsid",
             "source",
@@ -288,10 +294,14 @@ class Observation(razl.observations.Observation):
             "obs_links",
             "one_shot",
         ]
-        out = {attr: getattr(self, attr) for attr in attrs}
-        for attr in ["date_starcat", "kalman_start", "kalman_stop"]:
-            out[attr] = getattr(self, attr).date
-
+        date_attrs = ["date_starcat", "kalman_start", "kalman_stop"]
+        out = {}
+        for attr in attrs + date_attrs:
+            try:
+                val = getattr(self, attr)
+                out[attr] = val.date if attr in date_attrs else val
+            except Exception:
+                logger.info(f"could not get attribute {attr} for obsid {self.obsid}")
         return out
 
     @functools.cached_property
