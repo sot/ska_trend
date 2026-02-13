@@ -114,7 +114,7 @@ def check_for_no_dither(data_root) -> Table:
 def send_process_email(opt, no_dither_obs):
     subject = "New no-dither science observations found in ocat"
     text = [
-        "New No-dither science observations found in ocat: <br></br>",
+        "New no-dither science observations found in ocat: <br></br>",
     ]
     text.extend([f" obsid: {obsid} <br></br>" for obsid in no_dither_obs["obsid"]])
     text.extend([f"<br></br>See {GSHEET_USER_URL} for known no-dither obsids."])
