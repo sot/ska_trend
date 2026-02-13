@@ -71,10 +71,6 @@ def check_for_no_dither() -> Table:
     This function gets the science observations at or after proposal cycle 26 from the ocat with
     dither disabled or set to 0, then filters out the known no dither obsids from the google sheet.
 
-    Parameters
-    ----------
-    data_root : str
-        The root directory for the data (used to read/write the known no dither obsids
 
     Returns
     -------
