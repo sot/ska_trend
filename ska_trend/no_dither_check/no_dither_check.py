@@ -4,7 +4,6 @@
 import argparse
 import smtplib
 from email.mime.text import MIMEText
-from pathlib import Path
 
 import numpy as np
 import requests
@@ -56,9 +55,11 @@ def get_sheet() -> Table:
     try:
         req = retry_func(requests.get)(GSHEET_URL, timeout=5)
         if req.status_code != 200:
-            raise ConnectionError(f"Failed to read {GSHEET_URL} with status code: {req.status_code}")
+            raise ConnectionError(
+                f"Failed to read {GSHEET_URL} with status code: {req.status_code}"
+            )
     except Exception as e:
-        raise ConnectionError(f"Exception fetching Google Sheet: {e}")
+        raise ConnectionError(f"Exception fetching Google Sheet: {e}") from e
     dat = Table.read(req.text, format="ascii.csv")
     return dat
 
@@ -117,6 +118,9 @@ def main(sys_args=None):
     opt = get_opt().parse_args(sys_args)
 
     LOGGER.info("Checking for no dither observations")
+
+    # If we have an issue fetching the Google Sheet, it is probably intermittent
+    # so we log it just as info and exit the script (without error or email).
     try:
         no_dither_obs = check_for_no_dither()
     except ConnectionError as e:
