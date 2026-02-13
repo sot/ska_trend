@@ -69,6 +69,8 @@ def get_sheet(data_root) -> Table:
     else:
         dat = Table.read(req.text, format="ascii.csv")
         LOGGER.info(f"Writing google sheet to {Path(data_root) / file}")
+        # Make sure the data root directory exists
+        Path(data_root).mkdir(parents=True, exist_ok=True)
         dat.write(
             Path(data_root) / file,
             format="ascii.csv",
