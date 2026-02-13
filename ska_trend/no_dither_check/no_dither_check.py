@@ -36,16 +36,10 @@ def get_opt():
         dest="emails",
         help="Email address to send alerts",
     )
-    parser.add_argument(
-        "--data-root",
-        type=str,
-        default=".",
-        help="Root directory for data (trivial for this app)",
-    )
     return parser
 
 
-def get_sheet(data_root) -> Table:
+def get_sheet() -> Table:
     """
     Get the known dither disabled obsids from the Google sheet.
 
@@ -58,28 +52,18 @@ def get_sheet(data_root) -> Table:
     dat : astropy.table.Table
         Table of notes
     """
-    file = "known_no_dither_obsids.csv"
     LOGGER.info(f"Reading google sheet {GSHEET_URL}")
-    req = retry_func(requests.get)(GSHEET_URL, timeout=5)
-    if req.status_code != 200:
-        LOGGER.error(f"Failed to read {GSHEET_URL} with status code: {req.status_code}")
-        if (Path(data_root) / file).exists():
-            LOGGER.info(f"Reading local {file} file")
-            dat = Table.read(Path(data_root) / file, format="ascii.csv")
-    else:
-        dat = Table.read(req.text, format="ascii.csv")
-        LOGGER.info(f"Writing google sheet to {Path(data_root) / file}")
-        # Make sure the data root directory exists
-        Path(data_root).mkdir(parents=True, exist_ok=True)
-        dat.write(
-            Path(data_root) / file,
-            format="ascii.csv",
-            overwrite=True,
-        )
+    try:
+        req = retry_func(requests.get)(GSHEET_URL, timeout=5)
+        if req.status_code != 200:
+            raise ConnectionError(f"Failed to read {GSHEET_URL} with status code: {req.status_code}")
+    except Exception as e:
+        raise ConnectionError(f"Exception fetching Google Sheet: {e}")
+    dat = Table.read(req.text, format="ascii.csv")
     return dat
 
 
-def check_for_no_dither(data_root) -> Table:
+def check_for_no_dither() -> Table:
     """
     Check the ocat for new science observations with dither disabled or set to 0.
 
@@ -105,7 +89,7 @@ def check_for_no_dither(data_root) -> Table:
         & ((ocat["dither"] == "N") | ((ocat["y_amp"] == 0) | (ocat["z_amp"] == 0)))
     ]
     # get the known no dither obsids from the google sheet
-    known_no_dither_obsids = get_sheet(data_root)["obsid"].tolist()
+    known_no_dither_obsids = get_sheet()["obsid"].tolist()
 
     # filter out the known no dither obsids
     mask = ~np.isin(no_dither_obs["obsid"], known_no_dither_obsids)
@@ -133,7 +117,11 @@ def main(sys_args=None):
     opt = get_opt().parse_args(sys_args)
 
     LOGGER.info("Checking for no dither observations")
-    no_dither_obs = check_for_no_dither(opt.data_root)
+    try:
+        no_dither_obs = check_for_no_dither()
+    except ConnectionError as e:
+        LOGGER.info(f"Aborting: {e} due to issue fetching Google Sheet")
+        return
 
     if len(no_dither_obs) > 0:
         LOGGER.info(f"Sending email alert for {len(no_dither_obs)} obsids")
