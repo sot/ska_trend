@@ -693,12 +693,8 @@ def get_observations(
     start = CxoTime(start)
     stop = CxoTime(stop)
 
-    # Get planned commands as if no SCS-107 events occurred. This gives the planned
-    # obsids and other observation information from commands.
-    lookback_days = (stop - start + 14 * u.day).to_value(u.day)
-    with kc.set_time_now(stop), kc.conf.set_temp("default_lookback", lookback_days):
-        cmds = kc.get_cmds(start, stop, event_filter=kc.filter_scs107_events)
-
+    # Get observations from commands in the time interval
+    cmds = kc.get_cmds(start, stop)
     obss_razl = razl.observations.get_observations_from_cmds(
         cmds,
         allow_skip_first_obs=True,
