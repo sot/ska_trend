@@ -777,7 +777,7 @@ def get_centroid_resids_from_file(
 
     Returns
     -------
-    dict | None
+    dict[int, CentroidResidualsLite] | None
         Dictionary of CentroidResidualsLite objects keyed by slot, or None if the file
         does not exist.
     """
@@ -814,6 +814,9 @@ def get_centroid_resids_for_obsid(
     - ``dzags``: Z centroid residuals in arcseconds.
     - ``yag_times``: Times of the Y centroid residuals in CXC seconds.
     - ``zag_times``: Times of the Z centroid residuals in CXC seconds.
+
+    See the ``docs/centroid-dashboard-use-example.ipynb`` notebook in the repo for a
+    full example using this function to do statistical analysis.
 
     Parameters
     ----------
