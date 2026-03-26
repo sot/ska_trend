@@ -9,7 +9,7 @@ import subprocess
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 import agasc
 import astropy.units as u
@@ -489,6 +489,22 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def starcat_summary(self):
         return self.starcat.copy()
+
+    def starcheck_url(self, server: Literal["icxc", "occweb"]) -> str:
+        """Get URL for starcheck report on the specified server for this observation.
+
+        Parameters
+        ----------
+        server : str
+            "icxc" or "occweb"
+
+        Returns
+        -------
+        str
+            URL for the starcheck report.
+        """
+        load_url = parse_cm.paths.load_url_from_load_name(self.source, server=server)
+        return f"{load_url}/starcheck.html"
 
     def processed(self) -> bool:
         """Check if the observation has already been fully processed.

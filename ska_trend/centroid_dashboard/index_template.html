@@ -108,8 +108,8 @@
 {{obs.kalman_start.get_conversions()["local"]}}
 {% endif %}
 
-ObsID <a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obsid}}&load_name={{obs.source}}" target="_blank">{{obs.obsid}}</a>
-Source <a href="../../{{obs.source}}">{{obs.source}}</a>
+ObsID <a href="{{MICA_PORTAL}}/?obsid_or_date={{obs.obsid}}&load_name={{obs.source}}" target="_blank">{{obs.obsid}}</a> in {{obs.source}}
+Starcheck <a href="{{obs.starcheck_url('icxc')}}" target="_blank">ICXC</a> <a href="{{obs.starcheck_url('occweb')}}" target="_blank">OCCweb</a>
 {% if not traceback %}  <!-- if not traceback -->
 Kalman start: {{obs.kalman_start.date}}
         stop: {{obs.kalman_stop.date}}
@@ -192,7 +192,8 @@ None
                     {% for row in obs.starcat_summary %}
                     <tr>
                         <td align='right'>{{row["slot"]}}</td>
-                        <td align='right'>{{row["id"]}}</td>
+                        <td align='right'><a
+                        href="https://kadi.cfa.harvard.edu/star_hist/?agasc_id={{row['id']}}" target="_blank">{{row["id"]}}</a></td>
                         <td align='right'>{{row["type"]}}</td>
                         <td align='right'>{{"{:.2f}".format(row["mag"])}}</td>
                         <td align='right'>{{"{:.2f}".format(row["yang"])}}</td>
