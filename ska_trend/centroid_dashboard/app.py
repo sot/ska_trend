@@ -777,7 +777,7 @@ def get_centroid_resids_from_file(
 
     Returns
     -------
-    dict | None
+    dict[int, CentroidResidualsLite] | None
         Dictionary of CentroidResidualsLite objects keyed by slot, or None if the file
         does not exist.
     """
@@ -796,6 +796,76 @@ def get_centroid_resids_from_file(
         out[slot] = cr
 
     return out
+
+
+def get_centroid_resids_for_obsid(
+    obsid_sched: int, source: str | None = None, data_root: Path | None = None
+) -> dict[int, CentroidResidualsLite] | None:
+    """Get centroid residuals from flight telemetry for an observation.
+
+    This reads the pickle file ``centroid_resids.pkl`` for the requested ``obsid_sched``
+    (and ``source`` if required) and returns a dictionary of ``CentroidResidualsLite``
+    objects keyed by slot.
+
+    The ``CentroidResidualsLite`` object has four attributes that are compatible with
+    the full ``CentroidResiduals`` object from ``chandra_aca.centroid_resid``.
+
+    - ``dyags``: Y centroid residuals in arcseconds.
+    - ``dzags``: Z centroid residuals in arcseconds.
+    - ``yag_times``: Times of the Y centroid residuals in CXC seconds.
+    - ``zag_times``: Times of the Z centroid residuals in CXC seconds.
+
+    See the ``docs/centroid-dashboard-use-example.ipynb`` notebook in the repo for a
+    full example using this function to do statistical analysis.
+
+    Parameters
+    ----------
+    obsid_sched : int
+        Scheduled observation ID.
+    source : str | None
+        Source of the observation. If None then ``source`` is determined from
+        ``obsid_sched`` if this is unique.
+    data_root : Path | None
+        Data root directory (default=$SKA/data/centroid_dashboard/centroid_reports).
+
+    Returns
+    -------
+    dict[int, CentroidResidualsLite]
+        Dictionary of CentroidResidualsLite objects keyed by slot
+    """
+    if data_root is None:
+        data_root = (
+            Path(os.environ["SKA"]) / "data" / "centroid_dashboard" / "centroid_reports"
+        )
+    else:
+        data_root = Path(data_root)
+
+    if source is None:
+        obss = kc.get_observations(obsid_sched=obsid_sched)
+        if len(obss) == 0:
+            raise ValueError(f"no matching observations for {obsid_sched=}")
+        elif len(obss) > 1:
+            raise ValueError(
+                f"multiple matching observations for {obsid_sched=}:\n{obss}"
+            )
+        source = obss[0]["source"]
+
+    obs_stub = ObservationFromInfo(
+        opt={"data_root": data_root},
+        obsid=obsid_sched,
+        source=source,
+    )
+    crs = get_centroid_resids_from_file(obs_stub.path.centroid_resids_pkl)
+    if crs is None:
+        raise FileNotFoundError(
+            f"Centroid residuals not found for {obsid_sched=} and {source=}"
+            f" in {obs_stub.path.centroid_resids_pkl}"
+        )
+    for cr in crs.values():
+        cr.dyags = cr.dyags.astype(np.float64)
+        cr.dzags = cr.dzags.astype(np.float64)
+
+    return crs
 
 
 def get_centroid_resids(
