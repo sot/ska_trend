@@ -1449,12 +1449,14 @@ def main(args=None):
     start = CxoTime(opt.start) if opt.start else stop - NDAYS_DEFAULT * u.day
     logger.info(f"Processing from {start} to {stop}")
 
+    # 3-observation FIFO to access prev, curr, and next observations. The
+    # yield_observations() generator starts and ends with None to indicate unknown.
     obss = collections.deque(maxlen=3)
-    logger.info(f"Found {len(obss)} observations")
 
     for obs_next in yield_observations(start, stop, opt):
         obss.append(obs_next)
 
+        # Wait until we have filled the deque
         if len(obss) < 3:
             continue
 
