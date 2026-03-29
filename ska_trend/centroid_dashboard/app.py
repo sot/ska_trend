@@ -707,6 +707,7 @@ def yield_razl_observations_from_cmds(
     # Get observations in backstop (cmds) format.  This includes info about the maneuver
     # to each observation, obs (NPNT) start and stop times and star catalogs (where
     # applicable).
+    logger.info("Getting observations for cmds")
     obss_bs = kc.get_observations(cmds=cmds)
 
     # Get backstop star catalogs. The `id` and `mag` columns are set by matching with
@@ -714,6 +715,7 @@ def yield_razl_observations_from_cmds(
     # Failed matches are marked with an `id` and `mag` of -999. Matching tolerances are:
     # - Fids: 40 arcsec halfwidth box (kadi.commands.conf.fid_id_match_halfwidth)
     # - Stars: 1.5 arcsec halfwidth box (kadi.commands.conf.star_id_match_halfwidth)
+    logger.info("Getting starcats for cmds")
     starcats = kc.get_starcats(cmds=cmds)
     starcats_map = {starcat.date: starcat for starcat in starcats}
 
