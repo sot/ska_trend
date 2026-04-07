@@ -392,8 +392,12 @@ class Observation(razl.observations.Observation):
         return CxoTime(self.manvr_event.npnt_stop)
 
     @functools.cached_property
-    def info(self) -> str:
-        """Get key attributes for the info file.
+    def info(self) -> dict:
+        """Get key object attributes for writing to the info file as a dict.
+
+        This is intended for use to write the info.json file. Since this accesses cached
+        properties, accessing obj.info may result in the processing necessary to resolve
+        the attribute values.
 
         For observations that are not yet complete, these attributes may not be fully
         complete. This is common if the maneuver event is not yet available in
@@ -417,6 +421,13 @@ class Observation(razl.observations.Observation):
             except Exception:
                 logger.info(f"could not get attribute {attr} for obsid {self.obsid}")
         return out
+
+    @functools.cached_property
+    def info_json(self) -> dict | None:
+        if self.path.info_json.exists():
+            return json.loads(self.path.info_json.read_text())
+        else:
+            return None
 
     @functools.cached_property
     def one_shot(self) -> dict[str] | None:
@@ -512,15 +523,14 @@ class Observation(razl.observations.Observation):
         # If the current obs does not have an info.json file then we have no way to
         # get info about the prev/next obs. In this case return None. This normally
         # happens for the last observation when processing new observations.
-        if not (info_json := self.path.info_json).exists():
-            logger.info(f"No {info_json} file found, obs=None")
+        if (info := self.info_json) is None:
+            logger.info(f"No {self.path.info_json} file found, obs=None")
             return None
 
         # info.json is available, so it has an "obs_links" dict with "next" and "prev"
         # keys. Each of these can be either None (meaning not available) or a dict with
         # obsid, source, att_stats keys. This is not common but happens if you re-run
         # processing over the same date range.
-        info = json.loads(info_json.read_text())
         obs_link = info["obs_links"][link]
         if obs_link is None:
             logger.info(f"No {link} obs info found, obs=None")
@@ -544,6 +554,15 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def att_stats(self) -> dict[str, float]:
         raise_sporadic_exc_for_testing()
+
+        if self.is_ER:
+            return {}
+
+        if self.info_json and (att_stats := self.info_json.get("att_stats")):
+            # If att_stats is already in the info.json file and not empty, use that.
+            # This allows reprocessing without recomputing from the ground attitude.
+            return att_stats
+
         if self.att_deltas:
             out = {
                 "d_roll50": np.percentile(np.abs(self.att_deltas["d_roll"]), 50),
@@ -851,7 +870,7 @@ def yield_observations(
     start: CxoTimeLike,
     stop: CxoTimeLike,
     opt: argparse.Namespace | None = None,
-) -> Generator[Observation | None, None, None]:
+) -> Generator[Observation, None, None]:
     """
     Yield observations between the specified start and stop times.
 
@@ -1638,7 +1657,7 @@ def main(args=None):
 
     # 3-observation FIFO to access prev, curr, and next observations. The
     # yield_observations() generator starts and ends with None to indicate unknown.
-    obss = collections.deque(maxlen=3)
+    obss: collections.deque[Observation] = collections.deque(maxlen=3)
 
     for obs_next in yield_observations(start, stop, opt):
         obss.append(obs_next)
@@ -1647,8 +1666,8 @@ def main(args=None):
         if len(obss) < 3:
             continue
 
-        obs_prev = obss[0]
-        obs = obss[1]
+        obs_prev: Observation = obss[0]
+        obs: Observation = obss[1]
         # obs_next = obss[2]  # already set
 
         logger.info("*" * 80)
