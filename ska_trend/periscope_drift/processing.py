@@ -393,7 +393,9 @@ def get_sources(filename=None):
     filename = SOURCES_FILE if filename is None else filename
     if not filename.exists():
         raise FileNotFoundError(f"Sources file {filename} not found")
-    return Table.read(filename)
+    # https://github.com/astropy/astropy/issues/4069
+    # we want to convert to native endiannes upon read, because some plotly functions expect it
+    return Table(Table.read(filename).as_array())
 
 
 def update_sources(sources, obsids, filename=None):
