@@ -393,7 +393,11 @@ def get_sources(filename=None):
     filename = SOURCES_FILE if filename is None else filename
     if not filename.exists():
         raise FileNotFoundError(f"Sources file {filename} not found")
-    return Table.read(filename)
+    # we want to convert to native byteorder upon reading, because some plotly functions expect it,
+    # and the following is the easiest way to do it
+    # https://github.com/astropy/astropy/issues/4069
+    # https://github.com/astropy/astropy/pull/4080
+    return Table(Table.read(filename).as_array(keep_byteorder=False))
 
 
 def update_sources(sources, obsids, filename=None):
