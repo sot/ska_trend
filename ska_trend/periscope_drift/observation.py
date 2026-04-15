@@ -444,7 +444,7 @@ class PeriscopeDriftData(StorableClass):
 
         source_ids = list(set(data.keys()) & set(src["id"]))
 
-        src = src[np.in1d(src["id"], source_ids)]
+        src = src[np.isin(src["id"], source_ids)]
         data = {sid: data[sid] for sid in source_ids}
         return ObservationData(
             summary=self.get_summary(),
