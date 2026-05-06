@@ -914,7 +914,6 @@ def get_centroid_resids_for_obsid(
     obsid_sched: int,
     source: str | None = None,
     data_root: Path | None = None,
-    duration: float | None = None,
 ) -> dict[int, CentroidResidualsLite] | None:
     """Get centroid residuals from flight telemetry for an observation.
 
@@ -942,10 +941,6 @@ def get_centroid_resids_for_obsid(
         ``obsid_sched`` if this is unique.
     data_root : Path | None
         Data root directory (default=$SKA/data/centroid_dashboard/centroid_reports).
-    duration : float | None
-        If not None, trim the centroid residuals to duration in seconds. If positive,
-        then return duration seconds from the start of the observation. If negative,
-        trim return the last duration seconds from the end of the observation.
 
     Returns
     -------
@@ -971,17 +966,11 @@ def get_centroid_resids_for_obsid(
         )
 
     # Munge the yag/zag data type and trim by duration if requested.
-    out = {}
-    for slot, cr in crs.items():
+    for cr in crs.values():
         cr.dyags = cr.dyags.astype(np.float64)
         cr.dzags = cr.dzags.astype(np.float64)
 
-        if duration is not None:
-            duration = float(duration)
-            cr = cr[:duration] if duration > 0 else cr[duration:]  # noqa: PLW2901
-        out[slot] = cr
-
-    return out
+    return crs
 
 
 def get_centroid_resids(
