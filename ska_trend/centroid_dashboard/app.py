@@ -965,7 +965,7 @@ def get_centroid_resids_for_obsid(
             f" in {obs_stub.path.centroid_resids_pkl}"
         )
 
-    # Munge the yag/zag data type and trim by duration if requested.
+    # Munge the yag/zag data type
     for cr in crs.values():
         cr.dyags = cr.dyags.astype(np.float64)
         cr.dzags = cr.dzags.astype(np.float64)
