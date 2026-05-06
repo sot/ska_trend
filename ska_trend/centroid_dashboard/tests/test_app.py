@@ -1,4 +1,3 @@
-
 import numpy as np
 import pytest
 
@@ -52,16 +51,7 @@ def test_time_slice_with_step_raises(crs: CentroidResidualsLite) -> None:
 def test_get_centroid_resids_for_obsid_with_source() -> None:
     crs = cent_app.get_centroid_resids_for_obsid(29833, source="FEB0226A")
 
-    assert (
-        crs.keys()
-        == {
-            np.int64(3),
-            np.int64(4),
-            np.int64(5),
-            np.int64(6),
-            np.int64(7),
-        }.keys()
-    )
+    assert list(crs.keys()) == [3, 4, 5, 6, 7]
 
 
 def test_get_centroid_resids_for_obsid_without_source_raises_value_error() -> None:
