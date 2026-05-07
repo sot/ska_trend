@@ -2,6 +2,7 @@ import argparse
 import copy
 import functools
 import json
+import numbers
 import os
 import pickle
 import shutil
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
 NDAYS_DEFAULT = 7
 SKA = Path(os.environ["SKA"])
+DATA_ROOT_DEFAULT = SKA / "data" / "centroid_dashboard" / "centroid_reports"
 
 # Count of sporadic exceptions for testing. See `raise_sporadic_exc_for_testing`.
 SPORADIC_EXC_COUNT = 0
@@ -141,14 +143,124 @@ def get_template(template_name: str) -> jinja2.Template:
 class CentroidResidualsLite:
     """Lite version of CentroidResiduals.
 
-    This provides the attributes that are needed for processing in this application and
+    This follows the minimal API for ``chandra_aca.centroid_resids.CentroidResiduals``
+    and provides the attributes that are needed for processing in this application and
     are available in the centroid residuals file.
+
+    Attributes are:
+    - dyags: Y-angle centroid residuals in arcsec
+    - dzags: Z-angle centroid residuals in arcsec
+    - yag_times: Timestamps for Y-angle residuals (CXC seconds)
+    - zag_times: Timestamps for Z-angle residuals (CXC seconds)
+
+    Indexing and slicing are supported. There are three modes:
+
+    **Integer or array indexing** — standard NumPy index applied to all arrays::
+
+        cr[0]          # first sample
+        cr[-1]         # last sample
+        cr[[0, 2, 4]]  # select specific samples by index
+        cr[mask]       # boolean mask selection
+
+    **Integer slice** — standard NumPy slice applied to all arrays::
+
+        cr[10:50]      # samples 10 through 49
+        cr[::2]        # every other sample
+
+    **Time-based slice** — triggered when either ``start`` or ``stop`` is a
+    non-integer float (i.e. a CXC seconds timestamp). Positive offsets are
+    relative to the earliest time in the data; negative offsets are relative to
+    the latest time. A ``step`` is not supported for time-based slices::
+
+        t0 = cr.yag_times[0]
+        cr[0.0:500.0]        # first 500 seconds of data (offset from t_min)
+        cr[-300.0:]          # last 300 seconds of data (offset from t_max)
+        cr[:600.0]           # from start up to 600 seconds after t_min
     """
 
     dyags: npt.NDArray
     dzags: npt.NDArray
     yag_times: npt.NDArray
     zag_times: npt.NDArray
+
+    def __getitem__(self, item):
+        if not isinstance(item, slice) or not self._is_time_slice(item):
+            return self.__class__(
+                self.dyags[item],
+                self.dzags[item],
+                self.yag_times[item],
+                self.zag_times[item],
+            )
+
+        if item.step is not None:
+            raise TypeError("time-based slicing does not support a step")
+
+        time_min, time_max = self._get_time_limits()
+        yag_slice = self._slice_by_time(
+            self.dyags, self.yag_times, item, time_min, time_max
+        )
+        zag_slice = self._slice_by_time(
+            self.dzags, self.zag_times, item, time_min, time_max
+        )
+
+        return self.__class__(
+            yag_slice[0],
+            zag_slice[0],
+            yag_slice[1],
+            zag_slice[1],
+        )
+
+    @staticmethod
+    def _is_time_slice(item: slice) -> bool:
+        return any(
+            isinstance(bound, numbers.Real) and not isinstance(bound, numbers.Integral)
+            for bound in (item.start, item.stop)
+            if bound is not None
+        )
+
+    def _get_time_limits(self) -> tuple[float, float]:
+        time_min = np.inf
+        time_max = -np.inf
+        if len(self.yag_times) > 0:
+            time_min = min(time_min, float(np.min(self.yag_times)))
+            time_max = max(time_max, float(np.max(self.yag_times)))
+        if len(self.zag_times) > 0:
+            time_min = min(time_min, float(np.min(self.zag_times)))
+            time_max = max(time_max, float(np.max(self.zag_times)))
+        return time_min, time_max
+
+    @staticmethod
+    def _get_time_bound(
+        bound: object, time_min: float, time_max: float
+    ) -> float | None:
+        if bound is None:
+            return None
+
+        if isinstance(bound, numbers.Real) and not isinstance(bound, numbers.Integral):
+            bound = float(bound)
+            return time_max + bound if bound < 0 else time_min + bound
+
+        return float(bound)
+
+    @classmethod
+    def _slice_by_time(
+        cls,
+        vals: npt.NDArray,
+        times: npt.NDArray,
+        item: slice,
+        time_min: float,
+        time_max: float,
+    ) -> tuple[npt.NDArray, npt.NDArray]:
+        start = cls._get_time_bound(item.start, time_min, time_max)
+        stop = cls._get_time_bound(item.stop, time_min, time_max)
+
+        ok = np.ones(len(times), dtype=bool)
+        if start is not None:
+            ok &= times >= start
+        if stop is not None:
+            ok &= times < stop
+
+        return vals[ok], times[ok]
 
 
 class Paths:
@@ -799,7 +911,9 @@ def get_centroid_resids_from_file(
 
 
 def get_centroid_resids_for_obsid(
-    obsid_sched: int, source: str | None = None, data_root: Path | None = None
+    obsid_sched: int,
+    source: str | None = None,
+    data_root: Path | None = None,
 ) -> dict[int, CentroidResidualsLite] | None:
     """Get centroid residuals from flight telemetry for an observation.
 
@@ -833,21 +947,10 @@ def get_centroid_resids_for_obsid(
     dict[int, CentroidResidualsLite]
         Dictionary of CentroidResidualsLite objects keyed by slot
     """
-    if data_root is None:
-        data_root = (
-            Path(os.environ["SKA"]) / "data" / "centroid_dashboard" / "centroid_reports"
-        )
-    else:
-        data_root = Path(data_root)
+    data_root = DATA_ROOT_DEFAULT if data_root is None else Path(data_root)
 
     if source is None:
-        obss = kc.get_observations(obsid_sched=obsid_sched)
-        if len(obss) == 0:
-            raise ValueError(f"no matching observations for {obsid_sched=}")
-        elif len(obss) > 1:
-            raise ValueError(
-                f"multiple matching observations for {obsid_sched=}:\n{obss}"
-            )
+        obss = kc.get_observation(obsid_sched=obsid_sched)
         source = obss[0]["source"]
 
     obs_stub = ObservationFromInfo(
@@ -861,6 +964,8 @@ def get_centroid_resids_for_obsid(
             f"Centroid residuals not found for {obsid_sched=} and {source=}"
             f" in {obs_stub.path.centroid_resids_pkl}"
         )
+
+    # Munge the yag/zag data type
     for cr in crs.values():
         cr.dyags = cr.dyags.astype(np.float64)
         cr.dzags = cr.dzags.astype(np.float64)
