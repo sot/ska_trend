@@ -88,7 +88,7 @@ def main():
     logger.info("---------- astromon reports update at %s ----------" % (now.iso))
 
     stop = now if args.stop is None else CxoTime(args.stop)
-    start_report = parse_time_arg(args.start_report, stop)
+    start_report = parse_time_arg(args.start_report, stop=stop)
 
     reports.write_report(
         start=start_report,
