@@ -8,6 +8,7 @@ entry_points = {
         "ska_trend_centroid_dashboard=ska_trend.centroid_dashboard.app:main",
         "ska_trend_centroid_dashboard_check_continuity=ska_trend.centroid_dashboard.check_continuity:main",
         "ska_trend_fid_drop_mon_update=ska_trend.fid_drop_mon.update:main",
+        "ska_trend_astromon=ska_trend.astromon.scripts.astromon_reports:main",
         "ska_trend_periscope_drift=ska_trend.periscope_drift.scripts.periscope_drift_reports:main",
         "ska_trend_periscope_drift_regions=ska_trend.periscope_drift.scripts.periscope_drift_regions:main",
         "ska_trend_periscope_drift_regenerate=ska_trend.periscope_drift.scripts.periscope_drift_regenerate_reports:main",
@@ -32,6 +33,8 @@ setup(
     entry_points=entry_points,
     packages=[
         "ska_trend",
+        "ska_trend.astromon",
+        "ska_trend.astromon.scripts",
         "ska_trend.wrong_box_anom",
         "ska_trend.bad_periscope_gradient",
         "ska_trend.centroid_dashboard",
@@ -58,6 +61,11 @@ setup(
             "task_schedule.cfg",
             "templates/periscope_drift/index.html",
             "templates/periscope_drift/source_report.html",
+        ],
+        "ska_trend.astromon": [
+            "task_schedule.cfg",
+            "templates/astromon/index.html",
+            "templates/astromon/source_report.html",
         ],
     },
 )
