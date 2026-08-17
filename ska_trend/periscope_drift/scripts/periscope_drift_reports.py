@@ -111,8 +111,8 @@ def main():
 
     stop = now if args.stop is None else CxoTime(args.stop)
 
-    start_report = parse_time_arg(args.start_report, stop)
-    start_process = parse_time_arg(args.start, stop)
+    start_report = parse_time_arg(args.start_report, stop=stop)
+    start_process = parse_time_arg(args.start, stop=stop)
 
     errors = processing.process_interval(
         start_process,

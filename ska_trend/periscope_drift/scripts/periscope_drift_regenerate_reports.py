@@ -103,7 +103,7 @@ def main():
 
     stop = now if args.stop is None else CxoTime(args.stop)
 
-    start_report = parse_time_arg(args.start, stop)
+    start_report = parse_time_arg(args.start, stop=stop)
 
     reports.write_report(
         start=start_report,
