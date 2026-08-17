@@ -28,6 +28,7 @@ logger = logging.getLogger("astromon")
 __all__ = [
     "get_matches",
     "binned_offsets",
+    "simbad_url",
     "get_obsid_image",
     "get_source_markers",
     "crop_box",
@@ -195,7 +196,7 @@ def get_obsid_image(obsid, archive_dir):
     return image, wcs
 
 
-def _simbad_url(loc):
+def simbad_url(loc):
     ra = loc.ra.to_string(unit="hour")
     dec = loc.dec.to_string(unit="deg")
     return (
@@ -253,7 +254,7 @@ def get_source_markers(obsid, wcs, dbfile=None):
                 "name": str(row["name"]),
                 "catalog": str(row["catalog"]),
                 "symbol": symbol_for[str(row["catalog"])],
-                "simbad_url": _simbad_url(row["loc"]),
+                "simbad_url": simbad_url(row["loc"]),
             }
         )
 
@@ -362,7 +363,7 @@ def get_source_figure_data(
         mx = float(mx) - x0
         my = float(my) - y0
         if _inside(mx, my):
-            match = {"x": mx, "y": my, "simbad_url": _simbad_url(c_loc)}
+            match = {"x": mx, "y": my, "simbad_url": simbad_url(c_loc)}
 
     return {
         "image": cropped,

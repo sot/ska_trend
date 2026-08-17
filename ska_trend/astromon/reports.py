@@ -11,6 +11,7 @@ from pathlib import Path
 
 import jinja2
 from astropy import units as u
+from mica.archive.cda import get_proposal_abstract
 from tqdm import tqdm
 
 from ska_trend.astromon import data
@@ -171,10 +172,21 @@ def write_source_html_report(row, filename, archive_dir, dbfile=None, overwrite=
         # RA/Dec of the matched catalog source, for the exclude command
         "ra": float(row["c_ra"]),
         "dec": float(row["c_dec"]),
+        # SIMBAD coord-search link for the matched counterpart
+        "simbad_url": data.simbad_url(row["c_loc"]),
     }
 
+    try:
+        abstract = get_proposal_abstract(obsid)
+    except Exception as exc:
+        if str(exc).startswith("got error 404") or str(exc).startswith("got error 503"):
+            abstract = ""
+        else:
+            raise
+    ocat = {"abstract": abstract}
+
     template = JINJA_ENV.get_template("source_report.html")
-    page = template.render(source=source, source_figure=source_figure)
+    page = template.render(source=source, source_figure=source_figure, ocat=ocat)
 
     if not filename.parent.exists():
         filename.parent.mkdir(exist_ok=True, parents=True)

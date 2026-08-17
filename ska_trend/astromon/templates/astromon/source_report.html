@@ -74,7 +74,7 @@
               <th scope="row"> Catalog </th> <td>{{ source.catalog }} </td>
             </tr>
             <tr>
-              <th scope="row"> Counterpart </th> <td>{{ source.name }} (c_id {{ source.c_id }}) </td>
+              <th scope="row"> Counterpart </th> <td><a href="{{ source.simbad_url }}" target="_blank" rel="noopener">{{ source.name }}</a> (c_id {{ source.c_id }}) </td>
             </tr>
             <tr>
               <th scope="row"> dY (arcsec) </th> <td>{{ '{:.2f}'.format(source.dy) }} </td>
@@ -110,6 +110,22 @@
             <p> <div id="astromon_command"> <pre>
               astromon-excluded-region add --obsid {{ source.obsid }} --ra {{ source.ra }} --dec {{ source.dec }} --radius 10 --comment "Excluded after inspection";
             </pre></div> </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="accordion" id="accordionOcat">
+      <div class="accordion-item">
+        <h2 class="accordion-header" id="headingOcat">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOcat" aria-expanded="true" aria-controls="collapseOcat">
+            OCAT Information
+          </button>
+        </h2>
+        <div id="collapseOcat" class="accordion-collapse collapse" aria-labelledby="headingOcat" data-bs-parent="#accordionOcat">
+          <div class="accordion-body">
+            <h3> {{ ocat.abstract.proposal_title }}</h3>
+            <p> {{ ocat.abstract.abstract }}</p>
           </div>
         </div>
       </div>
