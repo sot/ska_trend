@@ -950,8 +950,8 @@ def get_centroid_resids_for_obsid(
     data_root = DATA_ROOT_DEFAULT if data_root is None else Path(data_root)
 
     if source is None:
-        obss = kc.get_observation(obsid_sched=obsid_sched)
-        source = obss[0]["source"]
+        obs = kc.get_observation(obsid_sched=obsid_sched)
+        source = obs["source"]
 
     obs_stub = ObservationFromInfo(
         opt={"data_root": data_root},
