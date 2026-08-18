@@ -913,7 +913,9 @@ def get_centroid_resids_from_file(
 def get_centroid_resids_for_obsid(
     obsid_sched: int,
     source: str | None = None,
+    *,
     data_root: Path | None = None,
+    time_slice: slice | None = None,
 ) -> dict[int, CentroidResidualsLite] | None:
     """Get centroid residuals from flight telemetry for an observation.
 
@@ -941,6 +943,11 @@ def get_centroid_resids_for_obsid(
         ``obsid_sched`` if this is unique.
     data_root : Path | None
         Data root directory (default=$SKA/data/centroid_dashboard/centroid_reports).
+    time_slice : slice | None
+        Optional slice to select a time range of the centroid residuals. The slice can
+        be specified in seconds relative to the start of the observation. For example,
+        ``slice(0, 1000)`` will select the first 1000 seconds of the observation. If
+        None, all times are returned.
 
     Returns
     -------
@@ -950,8 +957,8 @@ def get_centroid_resids_for_obsid(
     data_root = DATA_ROOT_DEFAULT if data_root is None else Path(data_root)
 
     if source is None:
-        obss = kc.get_observation(obsid_sched=obsid_sched)
-        source = obss[0]["source"]
+        obs = kc.get_observation(obsid_sched=obsid_sched)
+        source = obs["source"]
 
     obs_stub = ObservationFromInfo(
         opt={"data_root": data_root},
@@ -969,6 +976,9 @@ def get_centroid_resids_for_obsid(
     for cr in crs.values():
         cr.dyags = cr.dyags.astype(np.float64)
         cr.dzags = cr.dzags.astype(np.float64)
+
+    if time_slice is not None:
+        crs = {slot: cr[time_slice] for slot, cr in crs.items()}
 
     return crs
 
