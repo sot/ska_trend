@@ -4,15 +4,14 @@ import argparse
 import json
 import logging
 import os
-import re
 import sys
 from pathlib import Path
 
 import ska_helpers
 from cxotime import CxoTime
-from cxotime import units as u
 
 from ska_trend.periscope_drift import processing, reports
+from ska_trend.time_utils import parse_time_arg
 
 logger = logging.getLogger("periscope_drift")
 
@@ -27,14 +26,14 @@ def get_parser():
     )
     parser.add_argument(
         "--start",
-        default="-60d",
-        help="Start of processing interval. Default: NOW - 60d",
+        default="stop-60d",
+        help="Start of processing interval (e.g. stop-60d or a date). Default: stop-60d",
     )
     parser.add_argument("--stop", default=None)
     parser.add_argument(
         "--start-report",
-        default="-1825d",
-        help="Start of report interval. Default: NOW - 1825d (5 years ago)",
+        default="stop-1825d",
+        help="Start of report interval (e.g. stop-1825d or a date). Default: stop-1825d",
     )
     parser.add_argument(
         "--workdir",
@@ -112,15 +111,8 @@ def main():
 
     stop = now if args.stop is None else CxoTime(args.stop)
 
-    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start_report, re.VERBOSE):
-        start_report = stop + float(args.start_report[:-1]) * u.d
-    else:
-        start_report = CxoTime(args.start_report)
-
-    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", args.start, re.VERBOSE):
-        start_process = stop + float(args.start[:-1]) * u.d
-    else:
-        start_process = CxoTime(args.start)
+    start_report = parse_time_arg(args.start_report, stop=stop)
+    start_process = parse_time_arg(args.start, stop=stop)
 
     errors = processing.process_interval(
         start_process,
