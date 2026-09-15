@@ -29,6 +29,7 @@ from astropy.table import Table
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
 from cheta import fetch, fetch_eng, fetch_sci
+from cheta.utils import logical_intervals
 from cxotime import CxoTime, CxoTimeLike
 from matplotlib import pyplot as plt
 from mica.archive import asp_l1
@@ -1341,6 +1342,50 @@ def select_crs_slots(
     return {slot: crs[slot] for slot in slots}
 
 
+def shade_no_track_intervals(
+    ax: plt.Axes,
+    cr: CentroidResiduals | CentroidResidualsLite,
+    t_ref: float,
+) -> None:
+    """Shade intervals on ``ax`` where the OBC was not tracking.
+
+    Not-tracking samples have NaN centroid residuals (see ``set_no_track_to_nan`` in
+    ``get_centroid_resids``), so they appear as gaps in the residuals trace. Shading
+    makes the dropout explicit instead of leaving an unexplained gap.
+
+    Parameters
+    ----------
+    ax : plt.Axes
+        Axes to shade.
+    cr : CentroidResiduals or CentroidResidualsLite
+        Centroid residuals for one slot.
+    t_ref : float
+        Reference time (CXC seconds) that the plot x-axis is relative to.
+    """
+    # Union of the dyag and dzag dropouts. These are the same in practice but the yag
+    # and zag samples are not required to share a time base.
+    for ax_name in ["yag", "zag"]:
+        resids = np.asarray(getattr(cr, f"d{ax_name}s"), dtype=np.float64)
+        times = getattr(cr, f"{ax_name}_times")
+        if len(times) < 2:
+            continue
+
+        no_track = np.isnan(resids)
+        if not np.any(no_track):
+            continue
+
+        intervals = logical_intervals(times, no_track, complete_intervals=False)
+        for interval in intervals:
+            ax.axvspan(
+                interval["tstart"] - t_ref,
+                interval["tstop"] - t_ref,
+                color="red",
+                alpha=0.15,
+                lw=0,
+                zorder=0,
+            )
+
+
 def plot_crs_time(
     crs: dict[int, CentroidResiduals | CentroidResidualsLite],
     save_path: Path | None = None,
@@ -1382,6 +1427,12 @@ def plot_crs_time(
     legend = False
 
     for slot, ax in zip(crs, axes, strict=True):
+        cr = crs[slot]
+        # Same reference time as the traces below, which use their own first sample.
+        t_refs = [times[0] for times in (cr.yag_times, cr.zag_times) if len(times) > 0]
+        if t_refs:
+            shade_no_track_intervals(ax, cr, min(t_refs))
+
         for coord in ["yag", "zag"]:
             resids_obc = getattr(crs[slot], f"d{coord}s")
             times_obc = getattr(crs[slot], f"{coord}_times")

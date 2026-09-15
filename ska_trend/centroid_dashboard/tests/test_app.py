@@ -1,6 +1,7 @@
 import matplotlib
 import numpy as np
 import pytest
+from matplotlib import pyplot as plt
 
 import ska_trend.centroid_dashboard.app as cent_app
 
@@ -151,3 +152,46 @@ def test_plot_crs_time_slots(crs_slots, tmp_path, slots) -> None:
     cent_app.plot_crs_time(crs_slots, save_path, slots=slots)
 
     assert save_path.exists()
+
+
+def test_shade_no_track_intervals() -> None:
+    """One shaded span per NaN run, positioned relative to t_ref."""
+    times = 1000.0 + np.arange(20) * 1.025
+    dyags = np.ones(20)
+    dyags[3:6] = np.nan
+    dyags[15:18] = np.nan
+    cr = CentroidResidualsLite(
+        dyags=dyags,
+        dzags=dyags.copy(),
+        yag_times=times.copy(),
+        zag_times=times.copy(),
+    )
+    _fig, ax = plt.subplots()
+
+    cent_app.shade_no_track_intervals(ax, cr, times[0])
+
+    # Two NaN runs in each of dyag and dzag, which are shaded independently.
+    spans = sorted((patch.get_x(), patch.get_width()) for patch in ax.patches)
+    assert len(spans) == 4
+    # Spans bracket the NaN samples, relative to t_ref.
+    for x, width in spans[:2]:
+        assert times[2] - times[0] < x < times[3] - times[0]
+        assert times[5] < x + width + times[0] < times[6]
+    plt.close(_fig)
+
+
+def test_shade_no_track_intervals_no_nan() -> None:
+    """No NaN means no shading at all."""
+    times = 1000.0 + np.arange(10) * 1.025
+    cr = CentroidResidualsLite(
+        dyags=np.ones(10),
+        dzags=np.ones(10),
+        yag_times=times.copy(),
+        zag_times=times.copy(),
+    )
+    _fig, ax = plt.subplots()
+
+    cent_app.shade_no_track_intervals(ax, cr, times[0])
+
+    assert len(ax.patches) == 0
+    plt.close(_fig)
