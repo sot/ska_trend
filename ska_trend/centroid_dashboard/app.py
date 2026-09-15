@@ -1304,17 +1304,21 @@ def plot_n_kalman_delta_roll(
         kalman_plot_done_path.touch()
 
 
-def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None) -> None:
+def plot_crs_time(
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
+    save_path: Path | None = None,
+) -> None:
     """
     Make png plot of OBC centroid residuals in each slot.
 
-    Residuals computed using ground attitude solution for science observations
-    and OBC attitude solution for ER observations.
+    Residuals are computed with respect to the OBC attitude solution for both OR and
+    ER observations. Residuals larger than 5 arcsec are drawn in red, and samples
+    where the OBC was not tracking are NaN so they show as gaps.
 
     Parameters
     ----------
     crs : dict
-        Dictionary of CentroidResiduals objects keyed by slot.
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
     save_path : Path, optional
         Path to save the plot if not None.
     """
@@ -1377,24 +1381,32 @@ def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None) -> None
 
 def plot_crs_scatter(
     starcat: "ACATable",
-    crs: dict[int, CentroidResiduals],
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
     scale: float = 20,
     save_path: Path | None = None,
 ) -> None:
     """
-    Make visual plot of OBC centroid residuals.
+    Make visual plot of OBC centroid residuals on the ACA CCD.
 
-    Plot visualization of OBC centroid residuals with respect to ground (obc)
-    aspect solution for science (ER) observations in the yang/zang plain.
+    Each guide star is plotted at its catalog position with its centroid residuals
+    drawn around it, scaled up by ``scale`` to be visible, plus a ring marking 5 arcsec
+    at the same scale. Note that the plot data coordinates are CCD pixels (as set up by
+    ``chandra_aca.plot.plot_stars``) even though the axes are tick-labeled in arcsec.
+
+    Residuals are computed with respect to the OBC attitude solution for both OR and
+    ER observations. Slots without centroid residuals are skipped, and samples where
+    the OBC was not tracking are NaN so they do not plot.
 
     Parameters
     ----------
     starcat : ACATable
         Star catalog table.
     crs : dict
-        Dictionary of CentroidResiduals objects keyed by slot.
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
     scale : float, optional
-        Scale factor for residuals.
+        Scale factor applied to the residuals for display, in pixels per arcsec
+        (default=20). This deliberately exaggerates the residuals, since true scale
+        on the ACA CCD is about 0.2 pixels per arcsec.
     save_path : Path, optional
         Path to save the plot if not None.
     """
