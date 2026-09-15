@@ -1112,7 +1112,10 @@ def get_centroid_resids(
 
     logger.info("Computing centroid residuals from telemetry")
     crs = {}
-    cr = CentroidResiduals(start, stop)
+    # set_no_track_to_nan keeps samples where the OBC was not tracking and sets them to
+    # NaN, instead of dropping them and leaving an unmarked gap that the interpolation
+    # in write_centroid_resids would bridge with valid-looking small residuals.
+    cr = CentroidResiduals(start, stop, set_no_track_to_nan=True)
 
     # Grab attitude telemetry once for all slots, copying each time. This is basically
     # equivalent to cr.set_atts("obc"), but using quat_aoattqt is more robust.
@@ -1442,6 +1445,8 @@ def update_starcat_summary(
     crs: dict[int, CentroidResiduals],
 ) -> None:
     """Update starcat in place with median observed mag, dyag, dzag values."""
+    # NOTE: mag_median below is still computed over all samples including those where
+    # the OBC was not tracking, where AOACMAG reads the bad-data value.
     for name in ["dyag", "dzag", "mag"]:
         starcat[f"{name}_median"] = np.nan
 
@@ -1449,8 +1454,9 @@ def update_starcat_summary(
         slot = entry["slot"]
         if slot not in crs:
             continue
-        entry["dyag_median"] = np.median(crs[slot].dyags)
-        entry["dzag_median"] = np.median(crs[slot].dzags)
+        # nanmedian since not-tracking samples are NaN (see set_no_track_to_nan)
+        entry["dyag_median"] = np.nanmedian(crs[slot].dyags)
+        entry["dzag_median"] = np.nanmedian(crs[slot].dzags)
         mags = fetch.Msid(f"aoacmag{slot}", start, stop)
         entry["mag_median"] = np.median(mags.vals)
 
@@ -1531,6 +1537,9 @@ def write_centroid_resids(crs: dict[int, CentroidResiduals], save_path: Path) ->
                 logger.info(f"Overflow in {n_overflow} d{ax} values for slot {slot}")
             dyzs = dyzs.clip(-max16, max16)
             dyz_times = getattr(cr, attr_times)
+            # Non-tracking samples are NaN on a complete time base (see
+            # set_no_track_to_nan in get_centroid_resids), so np.interp propagates
+            # NaN across the dropout instead of bridging it with a smooth ramp.
             info_slot[attr_vals] = np.interp(times, dyz_times, dyzs).astype(np.float16)
 
         out[slot] = info_slot

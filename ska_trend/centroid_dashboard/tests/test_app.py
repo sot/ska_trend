@@ -58,3 +58,33 @@ def test_get_centroid_resids_for_obsid_without_source_raises_value_error() -> No
     match = r"expected one observation matching the filter criteria but got 2"
     with pytest.raises(ValueError, match=match):
         cent_app.get_centroid_resids_for_obsid(29833)
+
+
+def test_write_centroid_resids_does_not_bridge_no_track_gap(tmp_path) -> None:
+    """NaN not-tracking samples stay NaN when interpolated onto the output grid.
+
+    ``CentroidResiduals`` with ``set_no_track_to_nan=True`` gives a complete time base
+    with NaN where the OBC was not tracking. The interpolation in
+    ``write_centroid_resids`` must propagate that NaN rather than bridging the dropout
+    with a smooth ramp of valid-looking residuals.
+    """
+    # Complete 1.025 sec time base with samples 10-19 not tracking.
+    times = 1000.0 + np.arange(30) * 1.025
+    dyags = np.ones(30)
+    dzags = np.ones(30) * 2
+    dyags[10:20] = np.nan
+    dzags[10:20] = np.nan
+    cr = CentroidResidualsLite(
+        dyags=dyags, dzags=dzags, yag_times=times.copy(), zag_times=times.copy()
+    )
+    save_path = tmp_path / "centroid_resids.pkl"
+
+    cent_app.write_centroid_resids({6: cr}, save_path)
+    out = cent_app.get_centroid_resids_from_file(save_path)
+
+    for attr in ["dyags", "dzags"]:
+        vals = np.asarray(getattr(out[6], attr), dtype=np.float64)
+        in_gap = (out[6].yag_times >= times[10]) & (out[6].yag_times <= times[19])
+        assert np.all(np.isnan(vals[in_gap]))
+        # Samples outside the dropout are unaffected.
+        assert not np.any(np.isnan(vals[out[6].yag_times <= times[9]]))
