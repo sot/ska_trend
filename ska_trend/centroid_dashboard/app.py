@@ -1304,9 +1304,48 @@ def plot_n_kalman_delta_roll(
         kalman_plot_done_path.touch()
 
 
+def select_crs_slots(
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
+    slots: int | list[int] | None = None,
+) -> dict[int, CentroidResiduals | CentroidResidualsLite]:
+    """Select a subset of slots from a centroid residuals dict.
+
+    Parameters
+    ----------
+    crs : dict
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
+    slots : int or list of int, optional
+        Slot or list of slots to select, in the order given. If None then ``crs`` is
+        returned unchanged.
+
+    Returns
+    -------
+    dict
+        New dictionary with the selected slots, in the order given by ``slots``.
+    """
+    if slots is None:
+        return crs
+
+    if isinstance(slots, numbers.Integral):
+        slots = [slots]
+
+    # Report all the missing slots at once instead of failing on the first one. Slot
+    # keys can be numpy ints, so cast for a readable message.
+    if missing := [slot for slot in slots if slot not in crs]:
+        slots_avail = sorted(int(slot) for slot in crs)
+        missing = [int(slot) for slot in missing]
+        raise ValueError(
+            f"slots {missing} not in centroid residuals with slots {slots_avail}"
+        )
+
+    return {slot: crs[slot] for slot in slots}
+
+
 def plot_crs_time(
     crs: dict[int, CentroidResiduals | CentroidResidualsLite],
     save_path: Path | None = None,
+    *,
+    slots: int | list[int] | None = None,
 ) -> None:
     """
     Make png plot of OBC centroid residuals in each slot.
@@ -1321,15 +1360,24 @@ def plot_crs_time(
         Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
     save_path : Path, optional
         Path to save the plot if not None.
+    slots : int or list of int, optional
+        Slot or list of slots to plot, in the order given (default=all slots in
+        ``crs``).
     """
     if save_path and save_path.exists():
         logger.info("Plot file exists, skipping")
         return
 
+    crs = select_crs_slots(crs, slots)
+
     colors = {"yag": "k", "zag": "slategray"}
 
     n_slots = len(crs)
-    fig, axes = plt.subplots(nrows=n_slots, ncols=1, figsize=(8, n_slots * 7 / 8))
+    # squeeze=False so that axes is always a 1-d array, even for a single slot.
+    fig, axes = plt.subplots(
+        nrows=n_slots, ncols=1, figsize=(8, n_slots * 7 / 8), squeeze=False
+    )
+    axes = axes[:, 0]
 
     legend = False
 

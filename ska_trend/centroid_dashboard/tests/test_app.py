@@ -1,7 +1,11 @@
+import matplotlib
 import numpy as np
 import pytest
 
 import ska_trend.centroid_dashboard.app as cent_app
+
+# Non-interactive backend so the plot tests never touch a display.
+matplotlib.use("agg")
 
 CentroidResidualsLite = cent_app.CentroidResidualsLite
 
@@ -88,3 +92,62 @@ def test_write_centroid_resids_does_not_bridge_no_track_gap(tmp_path) -> None:
         assert np.all(np.isnan(vals[in_gap]))
         # Samples outside the dropout are unaffected.
         assert not np.any(np.isnan(vals[out[6].yag_times <= times[9]]))
+
+
+@pytest.fixture
+def crs_slots() -> dict[int, CentroidResidualsLite]:
+    """Centroid residuals for slots 3-7 with distinguishable dyags."""
+    times = 1000.0 + np.arange(5) * 1.025
+    return {
+        slot: CentroidResidualsLite(
+            dyags=np.full(5, float(slot)),
+            dzags=np.full(5, float(slot)),
+            yag_times=times.copy(),
+            zag_times=times.copy(),
+        )
+        for slot in range(3, 8)
+    }
+
+
+def test_select_crs_slots_default_is_unchanged(crs_slots) -> None:
+    assert cent_app.select_crs_slots(crs_slots, None) is crs_slots
+
+
+@pytest.mark.parametrize("slot", [6, np.int64(6)])
+def test_select_crs_slots_int(crs_slots, slot) -> None:
+    """A plain int (or numpy int) selects a single slot."""
+    out = cent_app.select_crs_slots(crs_slots, slot)
+
+    assert list(out) == [slot]
+    assert out[slot] is crs_slots[6]
+
+
+def test_select_crs_slots_list_keeps_order(crs_slots) -> None:
+    out = cent_app.select_crs_slots(crs_slots, [7, 3])
+
+    assert list(out) == [7, 3]
+    # The input dict is not modified.
+    assert list(crs_slots) == [3, 4, 5, 6, 7]
+
+
+def test_select_crs_slots_missing_raises(crs_slots) -> None:
+    """All missing slots are reported at once, not just the first."""
+    with pytest.raises(
+        ValueError, match=r"slots \[9, 11\] not in .* \[3, 4, 5, 6, 7\]"
+    ):
+        cent_app.select_crs_slots(crs_slots, [3, 9, 11])
+
+
+def test_plot_crs_time_slots_is_keyword_only(crs_slots, tmp_path) -> None:
+    with pytest.raises(TypeError, match="positional argument"):
+        cent_app.plot_crs_time(crs_slots, tmp_path / "x.png", [6])
+
+
+@pytest.mark.parametrize("slots", [6, [6], [6, 3], None])
+def test_plot_crs_time_slots(crs_slots, tmp_path, slots) -> None:
+    """Plotting works for a single slot as well as a subset or all slots."""
+    save_path = tmp_path / "crs_time.png"
+
+    cent_app.plot_crs_time(crs_slots, save_path, slots=slots)
+
+    assert save_path.exists()
