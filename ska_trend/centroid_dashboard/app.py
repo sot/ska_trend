@@ -1,4 +1,5 @@
 import argparse
+import collections
 import copy
 import functools
 import json
@@ -10,13 +11,14 @@ import subprocess
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Generator, Literal, Optional
 
 import agasc
 import astropy.units as u
 import chandra_aca.plot
 import jinja2
 import kadi.commands as kc
+import kadi.commands.core as kcc
 import kadi.events as ke
 import numpy as np
 import numpy.typing as npt
@@ -390,8 +392,12 @@ class Observation(razl.observations.Observation):
         return CxoTime(self.manvr_event.npnt_stop)
 
     @functools.cached_property
-    def info(self) -> str:
-        """Get key attributes for the info file.
+    def info(self) -> dict:
+        """Get key object attributes for writing to the info file as a dict.
+
+        This is intended for use to write the info.json file. Since this accesses cached
+        properties, accessing obj.info may result in the processing necessary to resolve
+        the attribute values.
 
         For observations that are not yet complete, these attributes may not be fully
         complete. This is common if the maneuver event is not yet available in
@@ -415,6 +421,13 @@ class Observation(razl.observations.Observation):
             except Exception:
                 logger.info(f"could not get attribute {attr} for obsid {self.obsid}")
         return out
+
+    @functools.cached_property
+    def info_json(self) -> dict | None:
+        if self.path.info_json.exists():
+            return json.loads(self.path.info_json.read_text())
+        else:
+            return None
 
     @functools.cached_property
     def one_shot(self) -> dict[str] | None:
@@ -510,15 +523,14 @@ class Observation(razl.observations.Observation):
         # If the current obs does not have an info.json file then we have no way to
         # get info about the prev/next obs. In this case return None. This normally
         # happens for the last observation when processing new observations.
-        if not (info_json := self.path.info_json).exists():
-            logger.info(f"No {info_json} file found, obs=None")
+        if (info := self.info_json) is None:
+            logger.info(f"No {self.path.info_json} file found, obs=None")
             return None
 
         # info.json is available, so it has an "obs_links" dict with "next" and "prev"
         # keys. Each of these can be either None (meaning not available) or a dict with
         # obsid, source, att_stats keys. This is not common but happens if you re-run
         # processing over the same date range.
-        info = json.loads(info_json.read_text())
         obs_link = info["obs_links"][link]
         if obs_link is None:
             logger.info(f"No {link} obs info found, obs=None")
@@ -542,6 +554,15 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def att_stats(self) -> dict[str, float]:
         raise_sporadic_exc_for_testing()
+
+        if self.is_ER:
+            return {}
+
+        if self.info_json and (att_stats := self.info_json.get("att_stats")):
+            # If att_stats is already in the info.json file and not empty, use that.
+            # This allows reprocessing without recomputing from the ground attitude.
+            return att_stats
+
         if self.att_deltas:
             out = {
                 "d_roll50": np.percentile(np.abs(self.att_deltas["d_roll"]), 50),
@@ -601,6 +622,22 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def starcat_summary(self):
         return self.starcat.copy()
+
+    def starcheck_url(self, server: Literal["icxc", "occweb"]) -> str:
+        """Get URL for starcheck report on the specified server for this observation.
+
+        Parameters
+        ----------
+        server : str
+            "icxc" or "occweb"
+
+        Returns
+        -------
+        str
+            URL for the starcheck report.
+        """
+        load_url = parse_cm.paths.load_url_from_load_name(self.source, server=server)
+        return f"{load_url}/starcheck.html#obsid{self.obsid}"
 
     def processed(self) -> bool:
         """Check if the observation has already been fully processed.
@@ -776,17 +813,74 @@ def get_obc_gnd_att_deltas(
     return out
 
 
-def get_observations(
+def yield_razl_observations_from_cmds(
+    cmds: kcc.CommandTable,
+) -> Generator[razl.observations.Observation, None, None]:
+    """Yield observations from a kadi commands table.
+
+    This is adapated from razl.observations.get_observations_from_cmds() but modified to
+    yield razl Observation objects one at a time instead of returning a list of
+    observations. This allows for more efficient processing and logging of each
+    observation as it is found.
+
+    Parameters
+    ----------
+    cmds : kcc.CommandTable
+        Kadi commands table.
+
+    Returns
+    -------
+    obs : Generator[razl.observations.Observation, None, None]
+        Generator of observations.
+    """
+    loads = razl.loads.Loads(cmds=cmds, opt={})
+
+    # Get observations in backstop (cmds) format.  This includes info about the maneuver
+    # to each observation, obs (NPNT) start and stop times and star catalogs (where
+    # applicable).
+    logger.info("Getting observations for cmds")
+    obss_bs = kc.get_observations(cmds=cmds)
+
+    # Get backstop star catalogs. The `id` and `mag` columns are set by matching with
+    # the AGASC field (given attitude) or fid positions (given SIM position).
+    # Failed matches are marked with an `id` and `mag` of -999. Matching tolerances are:
+    # - Fids: 40 arcsec halfwidth box (kadi.commands.conf.fid_id_match_halfwidth)
+    # - Stars: 1.5 arcsec halfwidth box (kadi.commands.conf.star_id_match_halfwidth)
+    logger.info("Getting starcats for cmds")
+    starcats = kc.get_starcats(cmds=cmds)
+    starcats_map = {starcat.date: starcat for starcat in starcats}
+
+    # Here we collect the maneuver(s) which precede each observation along with other
+    # values to fully populate the observation. The logic is a little intricate.
+    nman_dates = cmds["date"][cmds["tlmsid"] == "AONMMODE"]
+
+    # If the commands do not include the NMAN command prior to the maneuver start of
+    # the first observation then skip that first observation.
+    if len(obss_bs) > 0 and not np.any(nman_dates < obss_bs[0]["manvr_start"]):
+        obss_bs = obss_bs[1:]
+
+    while obss_bs:
+        obs, obss_bs = razl.observations._get_next_observation(
+            obss_bs, starcats_map, loads, nman_dates
+        )
+        yield obs
+
+
+def yield_observations(
     start: CxoTimeLike,
     stop: CxoTimeLike,
     opt: argparse.Namespace | None = None,
-) -> list[Observation]:
+) -> Generator[Observation, None, None]:
     """
-    Get observations between the specified start and stop times.
+    Yield observations between the specified start and stop times.
 
     This function uses the kadi get_cmds() to retrieve commands and the `razl` module to
     convert those commands into observations. It also logs information about each
     observation found.
+
+    This includes a ``None`` at the start and end of the generator, corresponding to
+    unknown previous and next observations for the first and last observations in the
+    time range.
 
     Parameters
     ----------
@@ -799,24 +893,19 @@ def get_observations(
 
     Returns
     -------
-    list of Observation
-        A list of Observation objects found between the specified start and stop times.
+    Generator[Observation | None, None, None]
+        Generate observation objects found between the specified start and stop times.
     """
     start = CxoTime(start)
     stop = CxoTime(stop)
 
-    # Get planned commands as if no SCS-107 events occurred. This gives the planned
-    # obsids and other observation information from commands.
-    lookback_days = (stop - start + 14 * u.day).to_value(u.day)
-    with kc.set_time_now(stop), kc.conf.set_temp("default_lookback", lookback_days):
-        cmds = kc.get_cmds(start, stop, event_filter=kc.filter_scs107_events)
+    # Get generator of razl Observation objects from commands in the time interval
+    cmds = kc.get_cmds(start, stop)
+    obss_razl = yield_razl_observations_from_cmds(cmds)
 
-    obss_razl = razl.observations.get_observations_from_cmds(
-        cmds,
-        allow_skip_first_obs=True,
-    )
+    # This is the initial previous observation, which is None
+    yield None
 
-    obss = []
     for obs_razl in obss_razl:
         # Create local Observation object from razl Observation object
         kwargs = {
@@ -824,6 +913,10 @@ def get_observations(
             for k in razl.observations.Observation.__annotations__
         }
         obs = Observation(**kwargs)
+
+        # Obsid filtering if specified.
+        if opt.obsid and obs.obsid != opt.obsid:
+            continue
 
         # Ignore intermediate attitude observations without a star catalog
         if obs.starcat is None:
@@ -833,13 +926,13 @@ def get_observations(
         obs.starcat = obs.starcat[np.isin(obs.starcat["type"], ["BOT", "GUI"])]
         if opt is not None:
             obs.opt.update(vars(opt))
-        obss.append(obs)
         logger.info(
             f"Found observation {obs.obsid} at {obs.obs_start} with {len(obs.manvrs)} manvrs"
         )
+        yield obs
 
-    return obss
-
+    # This is the final next observation, which is also None
+    yield None
 
 def write_redirect_html(target_dir: Path, redirect_file_path: Path):
     """Make an HTML redirect file for multiple ways to the same observation."""
@@ -1562,21 +1655,28 @@ def main(args=None):
     start = CxoTime(opt.start) if opt.start else stop - NDAYS_DEFAULT * u.day
     logger.info(f"Processing from {start} to {stop}")
 
-    obss = get_observations(start, stop, opt)
-    logger.info(f"Found {len(obss)} observations")
+    # 3-observation FIFO to access prev, curr, and next observations. The
+    # yield_observations() generator starts and ends with None to indicate unknown.
+    obss: collections.deque[Observation] = collections.deque(maxlen=3)
 
-    for idx, obs in enumerate(obss):
-        if opt.obsid and obs.obsid != opt.obsid:
+    for obs_next in yield_observations(start, stop, opt):
+        obss.append(obs_next)
+
+        # Wait until we have filled the deque
+        if len(obss) < 3:
             continue
+
+        obs_prev: Observation = obss[0]
+        obs: Observation = obss[1]
+        # obs_next = obss[2]  # already set
 
         logger.info("*" * 80)
         logger.info(f"Processing observation {obs.obsid}")
         logger.info("*" * 80)
 
-        obs.obs_prev = obss[idx - 1] if idx > 0 else obs.obs_link_from_info("prev")
-        obs.obs_next = (
-            obss[idx + 1] if idx < len(obss) - 1 else obs.obs_link_from_info("next")
-        )
+        obs.obs_prev = obs.obs_link_from_info("prev") if obs_prev is None else obs_prev
+        obs.obs_next = obs.obs_link_from_info("next") if obs_next is None else obs_next
+
         index_html_path = obs.path.index_html
         info_json_path = obs.path.info_json
 
