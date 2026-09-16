@@ -848,7 +848,8 @@ def yield_razl_observations_from_cmds(
     # - Fids: 40 arcsec halfwidth box (kadi.commands.conf.fid_id_match_halfwidth)
     # - Stars: 1.5 arcsec halfwidth box (kadi.commands.conf.star_id_match_halfwidth)
     logger.info("Getting starcats for cmds")
-    starcats = kc.get_starcats(cmds=cmds)
+    # Show a progress bar for large numbers of observations (typically a full repro)
+    starcats = kc.get_starcats(cmds=cmds, show_progress=len(obss_bs) > 1000)
     starcats_map = {starcat.date: starcat for starcat in starcats}
 
     # Here we collect the maneuver(s) which precede each observation along with other
