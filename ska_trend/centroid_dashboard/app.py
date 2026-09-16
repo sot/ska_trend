@@ -936,6 +936,7 @@ def yield_observations(
     # This is the final next observation, which is also None
     yield None
 
+
 def write_redirect_html(target_dir: Path, redirect_file_path: Path):
     """Make an HTML redirect file for multiple ways to the same observation."""
     logger.debug(f"Making redirect HTML to {target_dir}/index.html")
