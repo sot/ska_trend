@@ -29,6 +29,7 @@ from astropy.table import Table
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
 from cheta import fetch, fetch_eng, fetch_sci
+from cheta.utils import logical_intervals
 from cxotime import CxoTime, CxoTimeLike
 from matplotlib import pyplot as plt
 from mica.archive import asp_l1
@@ -847,7 +848,8 @@ def yield_razl_observations_from_cmds(
     # - Fids: 40 arcsec halfwidth box (kadi.commands.conf.fid_id_match_halfwidth)
     # - Stars: 1.5 arcsec halfwidth box (kadi.commands.conf.star_id_match_halfwidth)
     logger.info("Getting starcats for cmds")
-    starcats = kc.get_starcats(cmds=cmds)
+    # Show a progress bar for large numbers of observations (typically a full repro)
+    starcats = kc.get_starcats(cmds=cmds, show_progress=len(obss_bs) > 1000)
     starcats_map = {starcat.date: starcat for starcat in starcats}
 
     # Here we collect the maneuver(s) which precede each observation along with other
@@ -933,6 +935,7 @@ def yield_observations(
 
     # This is the final next observation, which is also None
     yield None
+
 
 def write_redirect_html(target_dir: Path, redirect_file_path: Path):
     """Make an HTML redirect file for multiple ways to the same observation."""
@@ -1112,7 +1115,10 @@ def get_centroid_resids(
 
     logger.info("Computing centroid residuals from telemetry")
     crs = {}
-    cr = CentroidResiduals(start, stop)
+    # set_no_track_to_nan keeps samples where the OBC was not tracking and sets them to
+    # NaN, instead of dropping them and leaving an unmarked gap that the interpolation
+    # in write_centroid_resids would bridge with valid-looking small residuals.
+    cr = CentroidResiduals(start, stop, set_no_track_to_nan=True)
 
     # Grab attitude telemetry once for all slots, copying each time. This is basically
     # equivalent to cr.set_atts("obc"), but using quat_aoattqt is more robust.
@@ -1301,32 +1307,134 @@ def plot_n_kalman_delta_roll(
         kalman_plot_done_path.touch()
 
 
-def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None) -> None:
-    """
-    Make png plot of OBC centroid residuals in each slot.
-
-    Residuals computed using ground attitude solution for science observations
-    and OBC attitude solution for ER observations.
+def select_crs_slots(
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
+    slots: int | list[int] | None = None,
+) -> dict[int, CentroidResiduals | CentroidResidualsLite]:
+    """Select a subset of slots from a centroid residuals dict.
 
     Parameters
     ----------
     crs : dict
-        Dictionary of CentroidResiduals objects keyed by slot.
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
+    slots : int or list of int, optional
+        Slot or list of slots to select, in the order given. If None then ``crs`` is
+        returned unchanged.
+
+    Returns
+    -------
+    dict
+        New dictionary with the selected slots, in the order given by ``slots``.
+    """
+    if slots is None:
+        return crs
+
+    if isinstance(slots, numbers.Integral):
+        slots = [slots]
+
+    # Report all the missing slots at once instead of failing on the first one. Slot
+    # keys can be numpy ints, so cast for a readable message.
+    if missing := [slot for slot in slots if slot not in crs]:
+        slots_avail = sorted(int(slot) for slot in crs)
+        missing = [int(slot) for slot in missing]
+        raise ValueError(
+            f"slots {missing} not in centroid residuals with slots {slots_avail}"
+        )
+
+    return {slot: crs[slot] for slot in slots}
+
+
+def shade_no_track_intervals(
+    ax: plt.Axes,
+    cr: CentroidResiduals | CentroidResidualsLite,
+    t_ref: float,
+) -> None:
+    """Shade intervals on ``ax`` where the OBC was not tracking.
+
+    Not-tracking samples have NaN centroid residuals (see ``set_no_track_to_nan`` in
+    ``get_centroid_resids``), so they appear as gaps in the residuals trace. Shading
+    makes the dropout explicit instead of leaving an unexplained gap.
+
+    Parameters
+    ----------
+    ax : plt.Axes
+        Axes to shade.
+    cr : CentroidResiduals or CentroidResidualsLite
+        Centroid residuals for one slot.
+    t_ref : float
+        Reference time (CXC seconds) that the plot x-axis is relative to.
+    """
+    # Union of the dyag and dzag dropouts. These are the same in practice but the yag
+    # and zag samples are not required to share a time base.
+    for ax_name in ["yag", "zag"]:
+        resids = np.asarray(getattr(cr, f"d{ax_name}s"), dtype=np.float64)
+        times = getattr(cr, f"{ax_name}_times")
+        if len(times) < 2:
+            continue
+
+        no_track = np.isnan(resids)
+        if not np.any(no_track):
+            continue
+
+        intervals = logical_intervals(times, no_track, complete_intervals=False)
+        for interval in intervals:
+            ax.axvspan(
+                interval["tstart"] - t_ref,
+                interval["tstop"] - t_ref,
+                color="red",
+                alpha=0.15,
+                lw=0,
+                zorder=0,
+            )
+
+
+def plot_crs_time(
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
+    save_path: Path | None = None,
+    *,
+    slots: int | list[int] | None = None,
+) -> None:
+    """
+    Make png plot of OBC centroid residuals in each slot.
+
+    Residuals are computed with respect to the OBC attitude solution for both OR and
+    ER observations. Residuals larger than 5 arcsec are drawn in red, and samples
+    where the OBC was not tracking are NaN so they show as gaps.
+
+    Parameters
+    ----------
+    crs : dict
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
     save_path : Path, optional
         Path to save the plot if not None.
+    slots : int or list of int, optional
+        Slot or list of slots to plot, in the order given (default=all slots in
+        ``crs``).
     """
     if save_path and save_path.exists():
         logger.info("Plot file exists, skipping")
         return
 
+    crs = select_crs_slots(crs, slots)
+
     colors = {"yag": "k", "zag": "slategray"}
 
     n_slots = len(crs)
-    fig, axes = plt.subplots(nrows=n_slots, ncols=1, figsize=(8, n_slots * 7 / 8))
+    # squeeze=False so that axes is always a 1-d array, even for a single slot.
+    fig, axes = plt.subplots(
+        nrows=n_slots, ncols=1, figsize=(8, n_slots * 7 / 8), squeeze=False
+    )
+    axes = axes[:, 0]
 
     legend = False
 
     for slot, ax in zip(crs, axes, strict=True):
+        cr = crs[slot]
+        # Same reference time as the traces below, which use their own first sample.
+        t_refs = [times[0] for times in (cr.yag_times, cr.zag_times) if len(times) > 0]
+        if t_refs:
+            shade_no_track_intervals(ax, cr, min(t_refs))
+
         for coord in ["yag", "zag"]:
             resids_obc = getattr(crs[slot], f"d{coord}s")
             times_obc = getattr(crs[slot], f"{coord}_times")
@@ -1374,24 +1482,32 @@ def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None) -> None
 
 def plot_crs_scatter(
     starcat: "ACATable",
-    crs: dict[int, CentroidResiduals],
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
     scale: float = 20,
     save_path: Path | None = None,
 ) -> None:
     """
-    Make visual plot of OBC centroid residuals.
+    Make visual plot of OBC centroid residuals on the ACA CCD.
 
-    Plot visualization of OBC centroid residuals with respect to ground (obc)
-    aspect solution for science (ER) observations in the yang/zang plain.
+    Each guide star is plotted at its catalog position with its centroid residuals
+    drawn around it, scaled up by ``scale`` to be visible, plus a ring marking 5 arcsec
+    at the same scale. Note that the plot data coordinates are CCD pixels (as set up by
+    ``chandra_aca.plot.plot_stars``) even though the axes are tick-labeled in arcsec.
+
+    Residuals are computed with respect to the OBC attitude solution for both OR and
+    ER observations. Slots without centroid residuals are skipped, and samples where
+    the OBC was not tracking are NaN so they do not plot.
 
     Parameters
     ----------
     starcat : ACATable
         Star catalog table.
     crs : dict
-        Dictionary of CentroidResiduals objects keyed by slot.
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
     scale : float, optional
-        Scale factor for residuals.
+        Scale factor applied to the residuals for display, in pixels per arcsec
+        (default=20). This deliberately exaggerates the residuals, since true scale
+        on the ACA CCD is about 0.2 pixels per arcsec.
     save_path : Path, optional
         Path to save the plot if not None.
     """
@@ -1442,6 +1558,8 @@ def update_starcat_summary(
     crs: dict[int, CentroidResiduals],
 ) -> None:
     """Update starcat in place with median observed mag, dyag, dzag values."""
+    # NOTE: mag_median below is still computed over all samples including those where
+    # the OBC was not tracking, where AOACMAG reads the bad-data value.
     for name in ["dyag", "dzag", "mag"]:
         starcat[f"{name}_median"] = np.nan
 
@@ -1449,8 +1567,9 @@ def update_starcat_summary(
         slot = entry["slot"]
         if slot not in crs:
             continue
-        entry["dyag_median"] = np.median(crs[slot].dyags)
-        entry["dzag_median"] = np.median(crs[slot].dzags)
+        # nanmedian since not-tracking samples are NaN (see set_no_track_to_nan)
+        entry["dyag_median"] = np.nanmedian(crs[slot].dyags)
+        entry["dzag_median"] = np.nanmedian(crs[slot].dzags)
         mags = fetch.Msid(f"aoacmag{slot}", start, stop)
         entry["mag_median"] = np.median(mags.vals)
 
@@ -1531,6 +1650,9 @@ def write_centroid_resids(crs: dict[int, CentroidResiduals], save_path: Path) ->
                 logger.info(f"Overflow in {n_overflow} d{ax} values for slot {slot}")
             dyzs = dyzs.clip(-max16, max16)
             dyz_times = getattr(cr, attr_times)
+            # Non-tracking samples are NaN on a complete time base (see
+            # set_no_track_to_nan in get_centroid_resids), so np.interp propagates
+            # NaN across the dropout instead of bridging it with a smooth ramp.
             info_slot[attr_vals] = np.interp(times, dyz_times, dyzs).astype(np.float16)
 
         out[slot] = info_slot
