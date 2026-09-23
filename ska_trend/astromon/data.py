@@ -15,11 +15,11 @@ import warnings
 from pathlib import Path
 
 import numpy as np
-from astromon import db
+from astromon import db, utils
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.table import Table
+from astropy.table import Table, join
 from astropy.wcs import WCS, FITSFixedWarning
 from cxotime import CxoTime
 
@@ -27,6 +27,7 @@ logger = logging.getLogger("astromon")
 
 __all__ = [
     "get_matches",
+    "add_reprocessed_offsets",
     "binned_offsets",
     "simbad_url",
     "get_obsid_image",
@@ -69,6 +70,18 @@ SELECTIONS = {
 }
 
 
+# The two versions of the offsets the report can show. "archive" is the offsets as the
+# observations were actually processed (what the archive holds today); "reprocessed" is the
+# same offsets brought to the latest CALALIGN calibration (see add_reprocessed_offsets).
+# The suffix is what the offset column name gets, e.g. "dy" and "dy_repro".
+OFFSET_VERSIONS = {
+    "reprocessed": {"suffix": "_repro", "label": "After reprocessing"},
+    "archive": {"suffix": "", "label": "In the archive"},
+}
+
+DEFAULT_OFFSET_VERSION = "reprocessed"
+
+
 def get_matches(selection="mta", dbfile=None):
     """
     Return a table of astrometric cross-matches, one row per (OBSID, x-ray source) pair.
@@ -96,6 +109,101 @@ def get_matches(selection="mta", dbfile=None):
     return matches
 
 
+def add_reprocessed_offsets(matches, calalign_dir=None):
+    """
+    Add the offsets that reprocessing with the latest CALALIGN calibration would give.
+
+    The offsets in the astromon db are the ones the observations were actually processed
+    with, which is what the archive holds today. Each one carries the CALALIGN calibration
+    that was current at the time, so the trend mixes several calibration epochs. Replacing
+    that by a single reference calibration takes the calibration history out of the trend.
+    This is the same correction celmon applies for its "offsets after reprocessing" figures.
+
+    Adds the ``dy_repro``, ``dz_repro`` and ``dr_repro`` columns to ``matches`` in place.
+
+    Parameters
+    ----------
+    matches : astropy.table.Table
+        Cross-match table (needs ``obsid``, ``x_id``, ``detector``, ``time``,
+        ``caldb_version``, ``dy`` and ``dz``).
+    calalign_dir : str or Path, optional
+        Directory holding the CALALIGN files. If None, the astromon default is used
+        (/data/caldb/data/chandra/pcad/align).
+
+    Raises
+    ------
+    ValueError
+        If ``matches`` is a subset that ``astromon.utils.get_calalign_offsets`` cannot
+        handle (see below), or if the CALALIGN offsets do not cover every match.
+    """
+    # Pass only the columns get_calalign_offsets needs, sorted by key: it joins the whole
+    # input table on "detector", and parts of its output are assembled from the input row
+    # order rather than from the keys.
+    keys = matches[["obsid", "x_id", "detector", "time", "caldb_version"]].copy()
+    keys.sort(["obsid", "x_id"])
+
+    # get_calalign_offsets parses caldb_version into a column of lists of ints. When every
+    # version in the input has the same number of components that column comes out as a 2-d
+    # array instead, and indexing with it raises a confusing IndexError. Guard for it here:
+    # the full cross-match table always mixes 3- and 4-component versions (e.g. "4.12.0" and
+    # "4.11.0.1"), so this only bites on a short time slice.
+    if len({len(version.split(".")) for version in keys["caldb_version"]}) < 2:
+        raise ValueError(
+            "cannot compute the reprocessed offsets: every caldb_version in this table has "
+            "the same number of components, which astromon.utils.get_calalign_offsets does "
+            "not handle. Pass the full cross-match table rather than a time slice."
+        )
+
+    calalign = utils.get_calalign_offsets(keys, calalign_dir=calalign_dir)
+    _set_reprocessed_offsets(matches, calalign)
+
+
+def _set_reprocessed_offsets(matches, calalign):
+    """
+    Set the reprocessed-offset columns from a table of CALALIGN offsets.
+
+    ``calalign`` (the output of ``astromon.utils.get_calalign_offsets``) has one row per
+    (obsid, x_id), but in join order rather than in the order of ``matches``, so the rows
+    are aligned by key here and never by position.
+
+    Parameters
+    ----------
+    matches : astropy.table.Table
+        Cross-match table. Modified in place.
+    calalign : astropy.table.Table
+        Needs ``obsid``, ``x_id`` and the ``calalign_`` / ``ref_calalign_`` dy/dz columns.
+    """
+    keys = matches[["obsid", "x_id"]].copy()
+    keys["_row"] = np.arange(len(matches))
+    columns = [
+        "obsid",
+        "x_id",
+        "calalign_dy",
+        "calalign_dz",
+        "ref_calalign_dy",
+        "ref_calalign_dz",
+    ]
+    # an inner join keeps the columns unmasked; the length check catches both missing and
+    # duplicated keys, either of which would misalign the result.
+    aligned = join(keys, calalign[columns], keys=["obsid", "x_id"], join_type="inner")
+    if len(aligned) != len(matches):
+        raise ValueError(
+            "expected one CALALIGN row per match, "
+            f"got {len(aligned)} rows for {len(matches)} matches"
+        )
+    aligned.sort("_row")
+
+    # the correction is the difference between the CALALIGN used to process the observation
+    # and the reference (latest) one.
+    matches["dy_repro"] = np.asarray(matches["dy"]) - np.asarray(
+        aligned["calalign_dy"] - aligned["ref_calalign_dy"]
+    )
+    matches["dz_repro"] = np.asarray(matches["dz"]) - np.asarray(
+        aligned["calalign_dz"] - aligned["ref_calalign_dz"]
+    )
+    matches["dr_repro"] = np.hypot(matches["dy_repro"], matches["dz_repro"])
+
+
 def binned_offsets(matches, coord, bins_per_year=2):
     """
     Per-bin median and 1-sigma band of an offset column versus time.
@@ -108,7 +216,7 @@ def binned_offsets(matches, coord, bins_per_year=2):
     matches : astropy.table.Table
         Cross-match table (needs a CxoTime ``time`` column and the ``coord`` column).
     coord : str
-        Offset column name ("dy" or "dz").
+        Offset column name ("dy" or "dz", or one of their "_repro" variants).
     bins_per_year : int
         Number of time bins per calendar year.
 

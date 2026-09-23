@@ -76,14 +76,25 @@
             <tr>
               <th scope="row"> Counterpart </th> <td><a href="{{ source.simbad_url }}" target="_blank" rel="noopener">{{ source.name }}</a> (c_id {{ source.c_id }}) </td>
             </tr>
+            {# the offsets as processed (in the archive), and, when available, the ones
+               reprocessing with the latest CALALIGN calibration would give #}
             <tr>
-              <th scope="row"> dY (arcsec) </th> <td>{{ '{:.2f}'.format(source.dy) }} </td>
+              <th scope="row"> dY (arcsec) </th>
+              <td>{{ '{:.2f}'.format(source.dy) }}
+                {% if source.dy_repro is not none %}<span class="text-muted">/ {{ '{:.2f}'.format(source.dy_repro) }} reprocessed</span>{% endif %}
+              </td>
             </tr>
             <tr>
-              <th scope="row"> dZ (arcsec) </th> <td>{{ '{:.2f}'.format(source.dz) }} </td>
+              <th scope="row"> dZ (arcsec) </th>
+              <td>{{ '{:.2f}'.format(source.dz) }}
+                {% if source.dz_repro is not none %}<span class="text-muted">/ {{ '{:.2f}'.format(source.dz_repro) }} reprocessed</span>{% endif %}
+              </td>
             </tr>
             <tr>
-              <th scope="row"> dR (arcsec) </th> <td>{{ '{:.2f}'.format(source.dr) }} </td>
+              <th scope="row"> dR (arcsec) </th>
+              <td>{{ '{:.2f}'.format(source.dr) }}
+                {% if source.dr_repro is not none %}<span class="text-muted">/ {{ '{:.2f}'.format(source.dr_repro) }} reprocessed</span>{% endif %}
+              </td>
             </tr>
             <tr>
               <th scope="row"> SNR </th> <td>{{ '{:.1f}'.format(source.snr) }} </td>

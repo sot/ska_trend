@@ -50,6 +50,13 @@ def get_parser():
         "($ASTROMON_FILE or $SKA/data/astromon/astromon.h5)",
     )
     parser.add_argument(
+        "--calalign-dir",
+        default=None,
+        type=Path,
+        help="Directory with the CALALIGN files, used for the reprocessed offsets. "
+        "Default: astromon default (/data/caldb/data/chandra/pcad/align)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
@@ -97,6 +104,7 @@ def main():
         archive_dir=args.astromon_archive_dir,
         dbfile=args.dbfile,
         selection=args.matches,
+        calalign_dir=args.calalign_dir,
         overwrite=args.overwrite,
         show_progress=args.show_progress,
     )

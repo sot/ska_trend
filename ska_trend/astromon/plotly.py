@@ -5,12 +5,14 @@ Two kinds of figures:
 
 - :func:`get_offsets_history_figure` -- the dY/dZ vs time timelines shown on the summary page.
   Points carry ``customdata = [obsid, x_id]`` so the page javascript can open the matching
-  per-source report on click.
+  per-source report on click. Each offset version (archive / reprocessed) contributes its own
+  traces, tagged with ``meta``, so the page javascript can switch between them.
 - :func:`get_source_figure` -- the cropped sky view (flux image heatmap + catalog/x-ray markers)
   that is the main element of each per-source page. This mirrors the react ``ObsidImage.js``
   component, but cropped around the source.
 """
 
+import numpy as np
 import plotly.graph_objects as go
 from cxotime import CxoTime
 
@@ -23,8 +25,16 @@ __all__ = [
 
 # axis labels and colors for each offset coordinate (matching celmon: dy blue, dz orange)
 COORD_INFO = {
-    "dy": {"title": "dY (arcsec)", "color": "#1f77b4"},
-    "dz": {"title": "dZ (arcsec)", "color": "#ff7f0e"},
+    "dy": {
+        "title": "dY (arcsec)",
+        "color": "#1f77b4",
+        "fillcolor": "rgba(31,119,180,0.25)",
+    },
+    "dz": {
+        "title": "dZ (arcsec)",
+        "color": "#ff7f0e",
+        "fillcolor": "rgba(255,127,14,0.25)",
+    },
 }
 
 
@@ -35,14 +45,18 @@ def _year_to_iso(years):
     return list(CxoTime(years, format="frac_year").isot)
 
 
-def _median_band_traces(matches, coord, color):
+def _median_band_traces(matches, column, info):
     """
     Build the binned-median line and ±1-sigma band traces (celmon q-history style).
 
     The median is drawn as one horizontal segment per time bin (disconnected between bins);
     the band is a single filled step polygon between the 15.8 and 84.2 percentiles.
+
+    ``column`` is the offset column to aggregate and ``info`` the :data:`COORD_INFO` entry
+    giving the colors; they are separate because the reprocessed columns ("dy_repro") are
+    drawn in the same colors as the coordinate they belong to.
     """
-    binned = data.binned_offsets(matches, coord)
+    binned = data.binned_offsets(matches, column)
     start_iso = _year_to_iso(binned["start"])
     stop_iso = _year_to_iso(binned["stop"])
     if not start_iso:
@@ -67,7 +81,7 @@ def _median_band_traces(matches, coord, color):
         mode="lines",
         line={"width": 0},
         fill="toself",
-        fillcolor="rgba(255,127,14,0.25)" if coord == "dz" else "rgba(31,119,180,0.25)",
+        fillcolor=info["fillcolor"],
         hoverinfo="skip",
         name="±1σ",
     )
@@ -81,7 +95,7 @@ def _median_band_traces(matches, coord, color):
         x=x_med,
         y=y_med,
         mode="lines",
-        line={"color": color, "width": 3},
+        line={"color": info["color"], "width": 3},
         hoverinfo="skip",
         name="median",
     )
@@ -95,10 +109,16 @@ def get_offsets_history_figure(matches, coord):
 
     A binned-median line and ±1-sigma band are overlaid (as on the celmon q-history plot).
 
+    One set of traces is built per offset version present in ``matches`` (see
+    :data:`ska_trend.astromon.data.OFFSET_VERSIONS`). Every trace is tagged with the version
+    name in ``meta`` and only the default version is visible, so the page javascript can
+    switch versions by flipping trace visibility.
+
     Parameters
     ----------
     matches : astropy.table.Table
-        Cross-match table (must have ``date_iso``, ``time``, ``obsid``, ``x_id`` and ``coord``).
+        Cross-match table (must have ``date_iso``, ``time``, ``obsid``, ``x_id`` and ``coord``;
+        the ``_repro`` variant of ``coord`` is used as well when it is there).
     coord : str
         Either ``"dy"`` or ``"dz"``.
 
@@ -107,25 +127,42 @@ def get_offsets_history_figure(matches, coord):
     plotly.graph_objects.Figure
     """
     info = COORD_INFO[coord]
-    # Use SVG Scatter (not Scattergl): WebGL traces in an initially-hidden tab pane never build
-    # their click layer, so plotly_click would not fire in non-default tabs. Point counts here
-    # (hundreds to a couple thousand) are well within SVG's comfort zone.
-    scatter = go.Scatter(
-        {
-            "x": list(matches["date_iso"]),
-            "y": list(matches[coord]),
-            "mode": "markers",
-            "name": coord,
-            "marker": {"size": 5, "color": "rgba(0,0,0,0.4)"},
-            "customdata": matches[["obsid", "x_id"]],
-            "hovertemplate": (
-                "OBSID: %{customdata[0]}<br>"
-                "x_id: %{customdata[1]}<br>"
-                f"{coord}: %{{y:.2f}}<extra></extra>"
-            ),
-        }
-    )
-    fig = go.Figure(data=[scatter, *_median_band_traces(matches, coord, info["color"])])
+    versions = [
+        version
+        for version, version_info in data.OFFSET_VERSIONS.items()
+        if coord + version_info["suffix"] in matches.colnames
+    ]
+
+    traces = []
+    for version in versions:
+        column = coord + data.OFFSET_VERSIONS[version]["suffix"]
+        # Use SVG Scatter (not Scattergl): WebGL traces in an initially-hidden tab pane never
+        # build their click layer, so plotly_click would not fire in non-default tabs. Point
+        # counts here (hundreds to a couple thousand) are well within SVG's comfort zone.
+        scatter = go.Scatter(
+            {
+                "x": list(matches["date_iso"]),
+                # a numpy array (not a list) so plotly sends it as a compact binary array
+                "y": np.asarray(matches[column]),
+                "mode": "markers",
+                "name": data.OFFSET_VERSIONS[version]["label"],
+                "marker": {"size": 5, "color": "rgba(0,0,0,0.4)"},
+                "customdata": matches[["obsid", "x_id"]],
+                "hovertemplate": (
+                    "OBSID: %{customdata[0]}<br>"
+                    "x_id: %{customdata[1]}<br>"
+                    f"{coord}: %{{y:.2f}}<extra></extra>"
+                ),
+            }
+        )
+        for trace in [scatter, *_median_band_traces(matches, column, info)]:
+            # the page javascript switches versions by matching this tag
+            trace.meta = version
+            if len(versions) > 1:
+                trace.visible = version == data.DEFAULT_OFFSET_VERSION
+            traces.append(trace)
+
+    fig = go.Figure(data=traces)
     fig.update_layout({"showlegend": False, "template": "simple_white"})
     # match celmon's initial vertical range (points outside are still reachable by zooming out)
     fig.update_yaxes({"title": info["title"], "range": [-1.1, 1.1]})

@@ -45,17 +45,24 @@ def get_data_for_interval(start, stop, matches, idx=0):
     sel = (matches["time"] >= start) & (matches["time"] < stop)
     interval = matches[sel]
 
+    # the div ids are handed to the template so the page javascript does not have to
+    # reconstruct this naming convention.
+    dz_id = f"dz_history_{idx}"
+    dy_id = f"dy_history_{idx}"
+
     return {
         "start": start.date[:8],
         "stop": stop.date[:8],
         "start_iso": start.iso[:10],
         "stop_iso": stop.iso[:10],
         "n": len(interval),
+        "dz_history_id": dz_id,
+        "dy_history_id": dy_id,
         "dz_history": plots.get_offsets_history_figure(interval, "dz").to_html(
-            div_id=f"dz_history_{idx}", **PLOTLY_KWARGS
+            div_id=dz_id, **PLOTLY_KWARGS
         ),
         "dy_history": plots.get_offsets_history_figure(interval, "dy").to_html(
-            div_id=f"dy_history_{idx}", **PLOTLY_KWARGS
+            div_id=dy_id, **PLOTLY_KWARGS
         ),
     }
 
@@ -123,6 +130,18 @@ def write_html_report(
     for rd, tr in zip(range_data, time_ranges, strict=True):
         rd["title"] = tr["title"]
 
+    # everything the offsets-version toggle needs: the figures it drives, the versions
+    # actually available in this table, and which one the figures start on.
+    context["figure_ids"] = [
+        rd[key] for rd in range_data for key in ("dy_history_id", "dz_history_id")
+    ]
+    context["versions"] = [
+        {"name": name, "label": info["label"]}
+        for name, info in data.OFFSET_VERSIONS.items()
+        if f"dy{info['suffix']}" in matches.colnames
+    ]
+    context["default_version"] = data.DEFAULT_OFFSET_VERSION
+
     template = JINJA_ENV.get_template("index.html")
     page = template.render(time_ranges=range_data, context=context)
     with open(outdir / "index.html", "w") as fh:
@@ -166,6 +185,15 @@ def write_source_html_report(row, filename, archive_dir, dbfile=None, overwrite=
         "dy": float(row["dy"]),
         "dz": float(row["dz"]),
         "dr": float(row["dr"]),
+        # the reprocessed offsets are absent when the CALALIGN files are not available
+        **{
+            f"{coord}_repro": (
+                float(row[f"{coord}_repro"])
+                if f"{coord}_repro" in row.colnames
+                else None
+            )
+            for coord in ("dy", "dz", "dr")
+        },
         "snr": float(row["snr"]),
         "r_angle": float(row["r_angle"]),
         "date_obs": str(row["date_obs"]),
@@ -202,6 +230,7 @@ def write_report(
     dbfile=None,
     matches=None,
     selection="mta",
+    calalign_dir=None,
     overwrite=False,
     show_progress=False,
 ):
@@ -222,8 +251,13 @@ def write_report(
         Astromon HDF5 db. If None, the astromon default is used.
     matches : astropy.table.Table, optional
         Pre-loaded cross-match table. If None, cross-matches are loaded using ``selection``.
+        The reprocessed-offset columns are added to it in place, and it should be the full
+        table, not a time slice (see :func:`ska_trend.astromon.data.add_reprocessed_offsets`).
     selection : str
         Cross-match selection ("all", "cal", "mta") used when ``matches`` is None. Default: "mta".
+    calalign_dir : str or Path, optional
+        Directory holding the CALALIGN files, used to compute the reprocessed offsets.
+        If None, the astromon default is used (/data/caldb/data/chandra/pcad/align).
     """
     # 5-year tab, plus an "all" tab covering the full report interval when it goes back further
     five_years = stop - 5 * 365 * u.day
@@ -235,6 +269,18 @@ def write_report(
 
     if matches is None:
         matches = data.get_matches(selection=selection, dbfile=dbfile)
+
+    try:
+        # on the whole table rather than on the report interval: a short interval can fail
+        # (see add_reprocessed_offsets), and this is also what celmon does.
+        data.add_reprocessed_offsets(matches, calalign_dir=calalign_dir)
+    except Exception as exc:
+        # the report is still useful with just the archive offsets, so carry on without the
+        # toggle. Note the wording: a log line containing "error" trips the task_schedule
+        # check and would flag the whole task as failed.
+        logger.warning(
+            f"Reprocessed offsets not available, showing archive only: {exc}"
+        )
 
     # only sources within the full report interval
     report_matches = matches[(matches["time"] >= start) & (matches["time"] < stop)]
@@ -259,6 +305,7 @@ def write_report(
             "archive_dir": str(archive_dir),
             "dbfile": str(dbfile),
             "selection": selection,
+            "calalign_dir": str(calalign_dir),
             "n_sources": len(report_matches),
         }
         json.dump(args, fh, indent=2, default=str)

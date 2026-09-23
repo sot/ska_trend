@@ -48,6 +48,24 @@
 			counterparts, versus time. Click a point to open the per-source report.
 		</p>
 
+		{% if context.versions | length > 1 %}
+		<p>
+			<b>In the archive</b> is the offsets as the observations are currently processed
+			in the archive, each with the CALALIGN calibration that was current at the time.
+			<b>After reprocessing</b> is the offsets that would result from reprocessing every
+			observation with the latest CALALIGN calibration.
+		</p>
+
+		<div class="btn-group mb-4" role="group" aria-label="Offsets version">
+			{% for version in context.versions %}
+			<input type="radio" class="btn-check" name="offsets-version"
+						 id="offsets-version-{{ version.name }}" value="{{ version.name }}"
+						 autocomplete="off"{% if version.name == context.default_version %} checked{% endif %}>
+			<label class="btn btn-outline-secondary" for="offsets-version-{{ version.name }}">{{ version.label }}</label>
+			{% endfor %}
+		</div>
+		{% endif %}
+
 		<ul class="nav nav-tabs" role="tablist">
 			{% for time_range in time_ranges %}
 			<li class="nav-item" role="presentation">
@@ -93,33 +111,58 @@
     crossorigin="anonymous">
   </script>
 
-  {% for time_range in time_ranges %}
-  {% set tr_idx = loop.index0 %}
-  {% for fig in ['dz_history', 'dy_history'] %}
   <script>
-	// the figure ID is set in the to_html method of the plotly figure using `div_id=...`
-	var myPlot = document.getElementById('{{ fig }}_{{ tr_idx }}');
+	// the figure IDs are set in the to_html method of the plotly figures using `div_id=...`
+	// and handed over in the template context by reports.write_html_report.
+	const offsetsFigures = {{ context.figure_ids | tojson }}
+		.map((id) => document.getElementById(id))
+		.filter((div) => div !== null);
 
-	myPlot.on('plotly_click', function(data) {
-		// requires a clicked marker whose customdata is [obsid, x_id]; fails silently otherwise.
-		// The resulting URL must agree with the file/directory structure.
-		if (
-			!data.points
-			|| !data.points[0]
-			|| !data.points[0].customdata
-			|| data.points[0].customdata.length < 2
-		) {
-			return;
-		}
-		const obsid = data.points[0].customdata[0];
-		const x_id = data.points[0].customdata[1];
-		const path = {{ context.source_report_path }};
-		console.log(`opening path: ${path} for obsid: ${obsid}, x_id: ${x_id}`);
-		window.open(path, '_blank');
+	offsetsFigures.forEach((figure) => {
+		figure.on('plotly_click', function (data) {
+			// requires a clicked marker whose customdata is [obsid, x_id]; fails silently
+			// otherwise. The resulting URL must agree with the file/directory structure.
+			if (
+				!data.points
+				|| !data.points[0]
+				|| !data.points[0].customdata
+				|| data.points[0].customdata.length < 2
+			) {
+				return;
+			}
+			const obsid = data.points[0].customdata[0];
+			const x_id = data.points[0].customdata[1];
+			const path = {{ context.source_report_path }};
+			console.log(`opening path: ${path} for obsid: ${obsid}, x_id: ${x_id}`);
+			window.open(path, '_blank');
+		});
 	});
+
+	// Switch every figure to one version of the offsets at once. Each trace is tagged with
+	// its version in `meta` (see plotly.get_offsets_history_figure), so this does not depend
+	// on the number or the order of the traces.
+	// Only restyle: a full re-layout in a tab pane clipped to height 0 measures zero and
+	// wrecks the figure, which is what the .tab-pane css above is there to avoid.
+	function showOffsetsVersion(version) {
+		offsetsFigures.forEach((figure) => {
+			const visible = figure.data.map((trace) => trace.meta === version);
+			Plotly.restyle(figure, {visible: visible}, figure.data.map((_, i) => i));
+		});
+	}
+
+	const versionInputs = document.querySelectorAll('input[name="offsets-version"]');
+	versionInputs.forEach((input) => {
+		input.addEventListener('change', function () {
+			showOffsetsVersion(this.value);
+		});
+	});
+	// apply the checked version once on load: browsers restore the previously checked radio
+	// on reload, which would otherwise disagree with the version the figures were built with.
+	const checked = document.querySelector('input[name="offsets-version"]:checked');
+	if (checked) {
+		showOffsetsVersion(checked.value);
+	}
   </script>
-  {% endfor %}
-  {% endfor %}
 
 
 </body>
