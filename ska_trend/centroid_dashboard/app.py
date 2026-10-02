@@ -441,9 +441,16 @@ class Observation(razl.observations.Observation):
 
     @functools.cached_property
     def info_json(self) -> dict | None:
+        """Contents of an existing info.json file, or None if there is not one.
+
+        This is the source of the values that are reused instead of being recomputed,
+        namely att_stats, starcat_summary and the t_ccd values.
+        """
         if self.path.info_json.exists():
+            logger.info(f"Reading existing {self.path.info_json}")
             return json.loads(self.path.info_json.read_text())
         else:
+            logger.debug(f"No existing {self.path.info_json}")
             return None
 
     @functools.cached_property
@@ -578,6 +585,7 @@ class Observation(razl.observations.Observation):
         if self.info_json and (att_stats := self.info_json.get("att_stats")):
             # If att_stats is already in the info.json file and not empty, use that.
             # This allows reprocessing without recomputing from the ground attitude.
+            logger.info(f"Using att_stats from info.json for obsid {self.obsid}")
             return att_stats
 
         if self.att_deltas:
@@ -602,6 +610,7 @@ class Observation(razl.observations.Observation):
         """Mean temperature of the CCDs during the observation."""
         if self.info_json and (t_ccd := self.info_json.get("t_ccd_mean")) is not None:
             # Stored by a previous run, so the HTML can be rebuilt without telemetry.
+            logger.debug(f"Using t_ccd_mean from info.json for obsid {self.obsid}")
             return t_ccd
         if self.aacccdpt_msid is None:
             return None
@@ -616,6 +625,7 @@ class Observation(razl.observations.Observation):
         """Max temperature of the CCDs during the observation."""
         if self.info_json and (t_ccd := self.info_json.get("t_ccd_max")) is not None:
             # Stored by a previous run, so the HTML can be rebuilt without telemetry.
+            logger.debug(f"Using t_ccd_max from info.json for obsid {self.obsid}")
             return t_ccd
         if self.aacccdpt_msid is None:
             return None
@@ -657,6 +667,9 @@ class Observation(razl.observations.Observation):
         """
         if "dyag_median" not in self.starcat.colnames:
             if self.info_json and (summary := self.info_json.get("starcat_summary")):
+                logger.info(
+                    f"Using starcat_summary from info.json for obsid {self.obsid}"
+                )
                 return summary
 
         # .item() converts numpy scalars to plain Python types for JSON serialization.
@@ -699,6 +712,7 @@ class Observation(razl.observations.Observation):
         for name in names:
             path = getattr(self.path, name)
             if isinstance(path, Path) and not path.exists():
+                logger.debug(f"No {path}, obsid {self.obsid} not fully processed")
                 return False
 
         info = json.loads(self.path.info_json.read_text())
@@ -715,6 +729,11 @@ class Observation(razl.observations.Observation):
         # Last check requires that every OR has values of att_stats (from OBC vs GND
         # attitude deltas). For planned OR's that do not run due to SCS-107, the att_stats
         # will never be computed so these obsids get reprocessed every time.
+        if not out:
+            logger.debug(
+                f"Every file exists but info.json for obsid {self.obsid} is "
+                "incomplete, not fully processed"
+            )
         return out
 
     def needs_centroid_resids(self) -> bool:
@@ -730,11 +749,18 @@ class Observation(razl.observations.Observation):
             "centroid_resids_time_png",
             "centroid_resids_scatter_png",
         ]
-        if any(not getattr(self.path, name).exists() for name in names):
-            return True
+        for name in names:
+            if not (path := getattr(self.path, name)).exists():
+                logger.info(f"No {path}, centroid residuals needed")
+                return True
 
         # starcat_summary medians are only in info.json if a previous run stored them.
-        return not (self.info_json and self.info_json.get("starcat_summary"))
+        if not (self.info_json and self.info_json.get("starcat_summary")):
+            logger.info("No starcat_summary in info.json, centroid residuals needed")
+            return True
+
+        logger.info("Centroid residuals products all exist, skipping")
+        return False
 
     def needs_kalman_plot(self) -> bool:
         """Check if the n_kalman / delta roll plot still needs to be made.
@@ -745,10 +771,13 @@ class Observation(razl.observations.Observation):
         remade until the ground aspect solution lands, as recorded by the
         kalman_plot_done touch file.
         """
-        return not (
+        if (
             self.path.n_kalman_delta_roll_png.exists()
             and self.path.kalman_plot_done.exists()
-        )
+        ):
+            logger.info("Plot file and kalman_plot_done exist, skipping")
+            return False
+        return True
 
 
 def get_gnd_atts(
@@ -787,6 +816,10 @@ def get_gnd_atts(
     obsid_dir_local = obs2_dir_local / obsid_str
 
     if not remote_copy:
+        logger.info(
+            f"No local ground aspect solution for obsid {obsid} and --remote-copy "
+            "not set, no ground attitudes"
+        )
         return [], []
 
     # Get a limited copy of the aspect solution data from the remote archive. This
