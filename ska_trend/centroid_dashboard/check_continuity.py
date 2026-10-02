@@ -161,10 +161,12 @@ class ContinuityChecker:
             if obs_key in visited_keys:
                 return (
                     False,
-                    f" Cycle detected at obsid {current_obs.obsid} {current_obs.date_starcat} "
-                    f"(source {current_obs.source})\n"
-                    f" Current obs date_starcat: {current_obs.date_starcat}, "
-                    f"previously visited at date_starcat: {visited_keys[obs_key]}",
+                    (
+                        f" Cycle detected at obsid {current_obs.obsid} {current_obs.date_starcat} "
+                        f"(source {current_obs.source})\n"
+                        f" Current obs date_starcat: {current_obs.date_starcat}, "
+                        f"previously visited at date_starcat: {visited_keys[obs_key]}"
+                    ),
                 )
 
             visited_keys[obs_key] = current_obs.date_starcat
