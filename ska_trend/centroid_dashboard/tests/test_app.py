@@ -1,6 +1,11 @@
+import argparse
+import itertools
+from types import SimpleNamespace
+
 import matplotlib
 import numpy as np
 import pytest
+from cxotime import CxoTime
 from matplotlib import pyplot as plt
 
 import ska_trend.centroid_dashboard.app as cent_app
@@ -195,3 +200,119 @@ def test_shade_no_track_intervals_no_nan() -> None:
 
     assert len(ax.patches) == 0
     plt.close(_fig)
+
+
+def make_obs_stub(obsid, source, date_starcat, obs_start, obs_stop, manvrs):  # noqa: PLR0917
+    """Minimal stand-in for Observation with the attrs resolve_duplicate_obs_key uses."""
+    return SimpleNamespace(
+        obsid=obsid,
+        source=source,
+        date_starcat=CxoTime(date_starcat),
+        obs_start=CxoTime(obs_start),
+        obs_stop=CxoTime(obs_stop),
+        manvrs=manvrs,
+    )
+
+
+def test_resolve_duplicate_obs_key_distinct_keys() -> None:
+    """Different obsids are left alone."""
+    obs = make_obs_stub(
+        26461,
+        "SEP2622B",
+        "2022:274:10:56:33.361",
+        "2022:274:11:16:58.964",
+        "2022:274:11:25:18.712",
+        ["manvr1"],
+    )
+    obs_next = make_obs_stub(
+        26093,
+        "SEP2622B",
+        "2022:274:16:04:24.712",
+        "2022:274:16:29:32.111",
+        "2022:275:00:20:31.859",
+        ["manvr2"],
+    )
+
+    assert cent_app.resolve_duplicate_obs_key(obs, obs_next) is False
+    assert obs_next.obs_start == CxoTime("2022:274:16:29:32.111")
+
+
+def test_resolve_duplicate_obs_key_merges_split_dwell() -> None:
+    """A dwell split by a mid-NPNT obsid change merges into one observation."""
+    obs = make_obs_stub(
+        26461,
+        "SEP2622B",
+        "2022:274:10:56:33.361",
+        "2022:274:11:16:58.964",
+        "2022:274:11:25:18.712",
+        ["manvr_to_dwell"],
+    )
+    obs_next = make_obs_stub(
+        26461,
+        "SEP2622B",
+        "2022:274:10:56:33.361",
+        "2022:274:11:25:18.713",
+        "2022:274:16:04:18.712",
+        ["manvr_spanning_split"],
+    )
+
+    assert cent_app.resolve_duplicate_obs_key(obs, obs_next) is True
+    # Merged observation spans the full dwell and keeps the real maneuver to it.
+    assert obs_next.obs_start == CxoTime("2022:274:11:16:58.964")
+    assert obs_next.obs_stop == CxoTime("2022:274:16:04:18.712")
+    assert obs_next.manvrs == ["manvr_to_dwell"]
+
+
+def test_resolve_duplicate_obs_key_drops_distinct_starcat() -> None:
+    """Distinct observations sharing a report key: keep the later one only."""
+    obs = make_obs_stub(
+        25768,
+        "MAR1323A",
+        "2023:075:16:17:15.705",
+        "2023:075:16:40:34.435",
+        "2023:075:19:01:34.183",
+        ["manvr1"],
+    )
+    obs_next = make_obs_stub(
+        25768,
+        "MAR1323A",
+        "2023:075:19:01:40.183",
+        "2023:075:19:32:55.411",
+        "2023:075:23:42:15.159",
+        ["manvr2"],
+    )
+
+    assert cent_app.resolve_duplicate_obs_key(obs, obs_next) is True
+    # The surviving observation is untouched, unlike the merge case.
+    assert obs_next.obs_start == CxoTime("2023:075:19:32:55.411")
+    assert obs_next.manvrs == ["manvr2"]
+
+
+@pytest.mark.parametrize(
+    "start,stop,obsid,source",
+    [
+        # Dwell split in two by a mid-NPNT obsid change (OR -> perigee CTI obsid).
+        ("2022:274:08:00:00", "2022:274:18:00:00", 26461, "SEP2622B"),
+        # Distinct observations that kadi gave the same scheduled obsid after the
+        # 2023:074 SCS-107 plus an unusually timed COAOSQID command event.
+        ("2023:075:14:00:00", "2023:076:02:00:00", 25768, "MAR1323A"),
+    ],
+)
+def test_resolve_duplicate_obs_key_on_real_observations(
+    start, stop, obsid, source
+) -> None:
+    """kadi still yields these as an adjacent pair, and both are resolved away."""
+    opt = argparse.Namespace(obsid=None, data_root="reports", remote_copy=False)
+    obss = [obs for obs in cent_app.yield_observations(start, stop, opt) if obs]
+
+    keys = [(obs.source, obs.obsid) for obs in obss]
+    assert keys.count((source, obsid)) == 2
+
+    idx = keys.index((source, obsid))
+    assert idx + 1 == keys.index((source, obsid), idx + 1), "pair is not adjacent"
+    assert cent_app.resolve_duplicate_obs_key(obss[idx], obss[idx + 1]) is True
+
+    # No other adjacent pair in the window shares a report key.
+    pairs = list(itertools.pairwise(obss))
+    others = [pair for i, pair in enumerate(pairs) if i != idx]
+    assert not any(cent_app.resolve_duplicate_obs_key(a, b) for a, b in others)

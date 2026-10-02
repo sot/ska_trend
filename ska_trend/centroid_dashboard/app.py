@@ -937,6 +937,69 @@ def yield_observations(
     yield None
 
 
+def resolve_duplicate_obs_key(obs: Observation, obs_next: Observation) -> bool:
+    """Resolve a duplicate ``(source, obsid)`` report key between adjacent observations.
+
+    The report directory and the prev/next links in info.json are both keyed on
+    ``(source, obsid)``, so two observations sharing that key overwrite each other and
+    produce a self-referential link that breaks the observation chain (see
+    ``check_continuity``). Observations here use the *scheduled* obsid, which is not
+    guaranteed unique within a load.
+
+    There are two ways adjacent observations can collide:
+
+    - Same star catalog: kadi splits a single dwell into two observations when the
+      as-run obsid changes during NPNT, e.g. an OR followed by the perigee CTI obsid
+      (e.g. 26461 -> 62625). These are one ACA observation with one maneuver, so
+      ``kalman_start`` and ``kalman_stop`` are identical for both halves and processing
+      them separately gives identical products. Merge them by extending the dwell of
+      ``obs_next``.
+
+    - Different star catalogs: genuinely different observations that collide because
+      kadi assigned them the same scheduled obsid. This is a known one-off around
+      2023:075 (obsid 25768), where an SCS-107 stopped the load obsid commands and an
+      unusually timed COAOSQID command event shifted which OBSID_SCH applied to each
+      dwell. Keep ``obs_next`` and drop ``obs``.
+
+    Either way ``obs_next`` is the observation to keep, so the caller drops ``obs`` from
+    the chain. This is safe for the already-written link in the *preceding* report: it
+    points at ``(source, obsid)``, which is by definition the key that ``obs_next`` also
+    has.
+
+    Parameters
+    ----------
+    obs : Observation
+        Current observation.
+    obs_next : Observation
+        Observation immediately following ``obs``.
+
+    Returns
+    -------
+    bool
+        True if ``obs`` was resolved away (merged into or superseded by ``obs_next``)
+        and should be dropped from the observation chain.
+    """
+    if (obs.source, obs.obsid) != (obs_next.source, obs_next.obsid):
+        return False
+
+    if obs.date_starcat == obs_next.date_starcat:
+        logger.info(
+            f"ObsID {obs.obsid} ({obs.source}) dwell split by an as-run obsid change, "
+            f"merging {obs.obs_start.date}-{obs.obs_stop.date} into "
+            f"{obs_next.obs_start.date}-{obs_next.obs_stop.date}"
+        )
+        obs_next.obs_start = obs.obs_start
+        obs_next.manvrs = obs.manvrs
+    else:
+        logger.warning(
+            f"ObsID {obs.obsid} ({obs.source}) has two observations with different "
+            f"star catalogs sharing one report key: {obs.date_starcat.date} and "
+            f"{obs_next.date_starcat.date}. Dropping the first one."
+        )
+
+    return True
+
+
 def write_redirect_html(target_dir: Path, redirect_file_path: Path):
     """Make an HTML redirect file for multiple ways to the same observation."""
     logger.debug(f"Making redirect HTML to {target_dir}/index.html")
@@ -1791,6 +1854,12 @@ def main(args=None):
         obs_prev: Observation = obss[0]
         obs: Observation = obss[1]
         # obs_next = obss[2]  # already set
+
+        if obs_next is not None and resolve_duplicate_obs_key(obs, obs_next):
+            # obs and obs_next share a report key, so obs was merged into obs_next or
+            # dropped. Take obs out of the FIFO so that obs_next links back to obs_prev.
+            del obss[1]
+            continue
 
         logger.info("*" * 80)
         logger.info(f"Processing observation {obs.obsid}")
