@@ -35,8 +35,11 @@ from matplotlib import pyplot as plt
 from mica.archive import asp_l1
 from Quaternion import Quat
 from ska_helpers.logging import basic_logger
+from ska_helpers.run_info import log_run_info
 from ska_matplotlib import plot_cxctime
 from starcheck.state_checks import calc_man_angle_for_duration
+
+from ska_trend import __version__
 
 if TYPE_CHECKING:
     from proseco.catalog import ACATable
@@ -1943,12 +1946,26 @@ def make_obsid_dir_links(obs: Observation):
     )
 
 
+def log_run_configuration(opt: argparse.Namespace) -> None:
+    """Log the version, time, user, machine and processing args for this run.
+
+    The ``--stop`` default is the ``CxoTime.NOW`` sentinel, which has no useful repr, so
+    show it by name in a copy. The identity of ``opt.stop`` is what selects
+    ``--no-last-links`` in ``main()``, so the real opt is left alone.
+    """
+    opt_info = argparse.Namespace(**vars(opt))
+    if opt_info.stop is CxoTime.NOW:
+        opt_info.stop = "NOW"
+    log_run_info(logger.info, opt_info, version=__version__)
+
+
 def main(args=None):
     # Always non-interactive plots for command-line app
     plt.switch_backend("agg")
 
     opt = get_opt().parse_args(args)
     logger.setLevel(opt.log_level)
+    log_run_configuration(opt)
 
     # Require --no-last-links if a non-NOW stop was specified for reprocessing an
     # interval. Otherwise it is too easy to corrupt the last links accidentally.
