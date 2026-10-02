@@ -43,6 +43,19 @@ if TYPE_CHECKING:
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
 NDAYS_DEFAULT = 7
+
+# Star catalog columns shown in the report table and stored in info.json.
+STARCAT_SUMMARY_COLS = (
+    "slot",
+    "id",
+    "type",
+    "mag",
+    "yang",
+    "zang",
+    "mag_median",
+    "dyag_median",
+    "dzag_median",
+)
 SKA = Path(os.environ["SKA"])
 DATA_ROOT_DEFAULT = SKA / "data" / "centroid_dashboard" / "centroid_reports"
 
@@ -412,6 +425,9 @@ class Observation(razl.observations.Observation):
             "manvr_angle",
             "obs_links",
             "one_shot",
+            "starcat_summary",
+            "t_ccd_mean",
+            "t_ccd_max",
         ]
         date_attrs = ["date_starcat", "kalman_start", "kalman_stop"]
         out = {}
@@ -584,19 +600,29 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def t_ccd_mean(self) -> float | None:
         """Mean temperature of the CCDs during the observation."""
+        if self.info_json and (t_ccd := self.info_json.get("t_ccd_mean")) is not None:
+            # Stored by a previous run, so the HTML can be rebuilt without telemetry.
+            return t_ccd
         if self.aacccdpt_msid is None:
             return None
-        # Get the mean temperature over the observation period
-        t_ccd = np.mean(self.aacccdpt_msid.vals)
+        # Get the mean temperature over the observation period. Cast to float since
+        # np.mean of the float32 telemetry gives a np.float32, which json cannot
+        # serialize and which write_info_json would not round.
+        t_ccd = float(np.mean(self.aacccdpt_msid.vals))
         return t_ccd
 
     @functools.cached_property
     def t_ccd_max(self) -> float | None:
         """Max temperature of the CCDs during the observation."""
+        if self.info_json and (t_ccd := self.info_json.get("t_ccd_max")) is not None:
+            # Stored by a previous run, so the HTML can be rebuilt without telemetry.
+            return t_ccd
         if self.aacccdpt_msid is None:
             return None
-        # Get the max temperature over the observation period
-        t_ccd = np.max(self.aacccdpt_msid.vals)
+        # Get the max temperature over the observation period. Cast to float since
+        # np.max of the float32 telemetry gives a np.float32, which json cannot
+        # serialize and which write_info_json would not round.
+        t_ccd = float(np.max(self.aacccdpt_msid.vals))
         return t_ccd
 
     @functools.cached_property
@@ -621,8 +647,23 @@ class Observation(razl.observations.Observation):
         return CxoTime(self.starcat.date)
 
     @functools.cached_property
-    def starcat_summary(self):
-        return self.starcat.copy()
+    def starcat_summary(self) -> list[dict]:
+        """Star catalog rows rendered in the report table.
+
+        This is stored in info.json so that the HTML report can be regenerated without
+        recomputing the centroid residuals or re-fetching telemetry. The live starcat
+        wins when ``update_starcat_summary`` has run in this process, so a forced
+        recompute is not masked by the stored values.
+        """
+        if "dyag_median" not in self.starcat.colnames:
+            if self.info_json and (summary := self.info_json.get("starcat_summary")):
+                return summary
+
+        # .item() converts numpy scalars to plain Python types for JSON serialization.
+        return [
+            {col: row[col].item() for col in STARCAT_SUMMARY_COLS}
+            for row in self.starcat
+        ]
 
     def starcheck_url(self, server: Literal["icxc", "occweb"]) -> str:
         """Get URL for starcheck report on the specified server for this observation.
@@ -675,6 +716,39 @@ class Observation(razl.observations.Observation):
         # attitude deltas). For planned OR's that do not run due to SCS-107, the att_stats
         # will never be computed so these obsids get reprocessed every time.
         return out
+
+    def needs_centroid_resids(self) -> bool:
+        """Check if anything still to be made depends on the centroid residuals.
+
+        The residuals feed the two centroid plots and the median columns of
+        ``starcat_summary``. When those products are all present the residuals are not
+        needed, so regenerating just the HTML (e.g. ``--remove=index.html`` with a new
+        template) costs no telemetry fetches and no read of the residuals file.
+        """
+        names = [
+            "centroid_resids_pkl",
+            "centroid_resids_time_png",
+            "centroid_resids_scatter_png",
+        ]
+        if any(not getattr(self.path, name).exists() for name in names):
+            return True
+
+        # starcat_summary medians are only in info.json if a previous run stored them.
+        return not (self.info_json and self.info_json.get("starcat_summary"))
+
+    def needs_kalman_plot(self) -> bool:
+        """Check if the n_kalman / delta roll plot still needs to be made.
+
+        This is the same condition that ``plot_n_kalman_delta_roll`` applies itself, but
+        checking it here avoids evaluating ``att_deltas`` just to pass it in, which
+        fetches attitude telemetry and reads the ground aspect solution. The plot is
+        remade until the ground aspect solution lands, as recorded by the
+        kalman_plot_done touch file.
+        """
+        return not (
+            self.path.n_kalman_delta_roll_png.exists()
+            and self.path.kalman_plot_done.exists()
+        )
 
 
 def get_gnd_atts(
@@ -1774,30 +1848,43 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
             f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping"
         )
 
-    # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
-    if obs.q_att_obc is None:
-        raise SkipObservation(f"ObsID {obs.obsid} has insufficient telemetry, skipping")
-
     start, stop = obs.kalman_start, obs.kalman_stop
 
-    # To allow faster reprocessing (e.g. just the HTML), try reading CRs from file
-    crs = get_centroid_resids(
-        start, stop, obs.starcat, obs.q_att_obc, obs.path.centroid_resids_pkl
-    )
-    write_centroid_resids(crs, obs.path.centroid_resids_pkl)
+    # Everything the HTML needs is in info.json, so skip this block entirely when the
+    # products that depend on the centroid residuals are already made. That makes
+    # regenerating just the HTML free of telemetry fetches and of reading the
+    # residuals file.
+    if obs.needs_centroid_resids():
+        # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
+        if obs.q_att_obc is None:
+            raise SkipObservation(
+                f"ObsID {obs.obsid} has insufficient telemetry, skipping"
+            )
 
-    plot_crs_time(crs, obs.path.centroid_resids_time_png)
-    plot_crs_scatter(obs.starcat, crs, save_path=obs.path.centroid_resids_scatter_png)
-    plot_n_kalman_delta_roll(
-        start,
-        stop,
-        obs.att_deltas,
-        obs.path.n_kalman_delta_roll_png,
-        obs.path.kalman_plot_done,
-        obs.is_ER,
-    )
+        # To allow faster reprocessing (e.g. just the plots), try reading CRs from file
+        crs = get_centroid_resids(
+            start, stop, obs.starcat, obs.q_att_obc, obs.path.centroid_resids_pkl
+        )
+        write_centroid_resids(crs, obs.path.centroid_resids_pkl)
 
-    update_starcat_summary(start, stop, obs.starcat, crs)
+        plot_crs_time(crs, obs.path.centroid_resids_time_png)
+        plot_crs_scatter(
+            obs.starcat, crs, save_path=obs.path.centroid_resids_scatter_png
+        )
+        update_starcat_summary(start, stop, obs.starcat, crs)
+
+    # Gated separately from the centroid residuals: this replots until the ground
+    # aspect solution lands. See Observation.needs_kalman_plot().
+    if obs.needs_kalman_plot():
+        plot_n_kalman_delta_roll(
+            start,
+            stop,
+            obs.att_deltas,
+            obs.path.n_kalman_delta_roll_png,
+            obs.path.kalman_plot_done,
+            obs.is_ER,
+        )
+
     write_index_html(obs, obs.path.index_html)
     write_info_json(obs, obs.path.info_json)
     make_obsid_dir_links(obs)
