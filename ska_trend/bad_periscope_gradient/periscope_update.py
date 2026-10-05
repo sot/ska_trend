@@ -125,8 +125,10 @@ def send_process_email(opt, bad_science_data):
     cols = ["date", "msid", "AOPCADMD", "AOACASEQ", "COBSRQID", "manvr_obsid"]
     data_html = bad_science_data[cols].pformat(max_lines=-1, max_width=-1, html=True)
     text = [
-        "Discontinuities found in periscope gradient data."
-        "Check V&V for these science observations."
+        (
+            "Discontinuities found in periscope gradient data."
+            "Check V&V for these science observations."
+        )
     ]
     text.extend(data_html)
     msg = MIMEText("\n".join(text), "html")

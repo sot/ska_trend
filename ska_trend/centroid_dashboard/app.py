@@ -1,4 +1,5 @@
 import argparse
+import collections
 import copy
 import functools
 import json
@@ -10,13 +11,14 @@ import subprocess
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Generator, Literal, Optional
 
 import agasc
 import astropy.units as u
 import chandra_aca.plot
 import jinja2
 import kadi.commands as kc
+import kadi.commands.core as kcc
 import kadi.events as ke
 import numpy as np
 import numpy.typing as npt
@@ -27,19 +29,36 @@ from astropy.table import Table
 from chandra_aca.centroid_resid import CentroidResiduals
 from chandra_aca.transform import yagzag_to_pixels
 from cheta import fetch, fetch_eng, fetch_sci
+from cheta.utils import logical_intervals
 from cxotime import CxoTime, CxoTimeLike
 from matplotlib import pyplot as plt
 from mica.archive import asp_l1
 from Quaternion import Quat
 from ska_helpers.logging import basic_logger
+from ska_helpers.run_info import log_run_info
 from ska_matplotlib import plot_cxctime
 from starcheck.state_checks import calc_man_angle_for_duration
+
+from ska_trend import __version__
 
 if TYPE_CHECKING:
     from proseco.catalog import ACATable
 
 # Update guide metrics file with new obsids between NOW and (NOW - NDAYS_DEFAULT) days
 NDAYS_DEFAULT = 7
+
+# Star catalog columns shown in the report table and stored in info.json.
+STARCAT_SUMMARY_COLS = (
+    "slot",
+    "id",
+    "type",
+    "mag",
+    "yang",
+    "zang",
+    "mag_median",
+    "dyag_median",
+    "dzag_median",
+)
 SKA = Path(os.environ["SKA"])
 DATA_ROOT_DEFAULT = SKA / "data" / "centroid_dashboard" / "centroid_reports"
 
@@ -390,8 +409,12 @@ class Observation(razl.observations.Observation):
         return CxoTime(self.manvr_event.npnt_stop)
 
     @functools.cached_property
-    def info(self) -> str:
-        """Get key attributes for the info file.
+    def info(self) -> dict:
+        """Get key object attributes for writing to the info file as a dict.
+
+        This is intended for use to write the info.json file. Since this accesses cached
+        properties, accessing obj.info may result in the processing necessary to resolve
+        the attribute values.
 
         For observations that are not yet complete, these attributes may not be fully
         complete. This is common if the maneuver event is not yet available in
@@ -405,6 +428,9 @@ class Observation(razl.observations.Observation):
             "manvr_angle",
             "obs_links",
             "one_shot",
+            "starcat_summary",
+            "t_ccd_mean",
+            "t_ccd_max",
         ]
         date_attrs = ["date_starcat", "kalman_start", "kalman_stop"]
         out = {}
@@ -415,6 +441,20 @@ class Observation(razl.observations.Observation):
             except Exception:
                 logger.info(f"could not get attribute {attr} for obsid {self.obsid}")
         return out
+
+    @functools.cached_property
+    def info_json(self) -> dict | None:
+        """Contents of an existing info.json file, or None if there is not one.
+
+        This is the source of the values that are reused instead of being recomputed,
+        namely att_stats, starcat_summary and the t_ccd values.
+        """
+        if self.path.info_json.exists():
+            logger.info(f"Reading existing {self.path.info_json}")
+            return json.loads(self.path.info_json.read_text())
+        else:
+            logger.debug(f"No existing {self.path.info_json}")
+            return None
 
     @functools.cached_property
     def one_shot(self) -> dict[str] | None:
@@ -510,15 +550,14 @@ class Observation(razl.observations.Observation):
         # If the current obs does not have an info.json file then we have no way to
         # get info about the prev/next obs. In this case return None. This normally
         # happens for the last observation when processing new observations.
-        if not (info_json := self.path.info_json).exists():
-            logger.info(f"No {info_json} file found, obs=None")
+        if (info := self.info_json) is None:
+            logger.info(f"No {self.path.info_json} file found, obs=None")
             return None
 
         # info.json is available, so it has an "obs_links" dict with "next" and "prev"
         # keys. Each of these can be either None (meaning not available) or a dict with
         # obsid, source, att_stats keys. This is not common but happens if you re-run
         # processing over the same date range.
-        info = json.loads(info_json.read_text())
         obs_link = info["obs_links"][link]
         if obs_link is None:
             logger.info(f"No {link} obs info found, obs=None")
@@ -542,6 +581,16 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def att_stats(self) -> dict[str, float]:
         raise_sporadic_exc_for_testing()
+
+        if self.is_ER:
+            return {}
+
+        if self.info_json and (att_stats := self.info_json.get("att_stats")):
+            # If att_stats is already in the info.json file and not empty, use that.
+            # This allows reprocessing without recomputing from the ground attitude.
+            logger.info(f"Using att_stats from info.json for obsid {self.obsid}")
+            return att_stats
+
         if self.att_deltas:
             out = {
                 "d_roll50": np.percentile(np.abs(self.att_deltas["d_roll"]), 50),
@@ -562,19 +611,31 @@ class Observation(razl.observations.Observation):
     @functools.cached_property
     def t_ccd_mean(self) -> float | None:
         """Mean temperature of the CCDs during the observation."""
+        if self.info_json and (t_ccd := self.info_json.get("t_ccd_mean")) is not None:
+            # Stored by a previous run, so the HTML can be rebuilt without telemetry.
+            logger.debug(f"Using t_ccd_mean from info.json for obsid {self.obsid}")
+            return t_ccd
         if self.aacccdpt_msid is None:
             return None
-        # Get the mean temperature over the observation period
-        t_ccd = np.mean(self.aacccdpt_msid.vals)
+        # Get the mean temperature over the observation period. Cast to float since
+        # np.mean of the float32 telemetry gives a np.float32, which json cannot
+        # serialize and which write_info_json would not round.
+        t_ccd = float(np.mean(self.aacccdpt_msid.vals))
         return t_ccd
 
     @functools.cached_property
     def t_ccd_max(self) -> float | None:
         """Max temperature of the CCDs during the observation."""
+        if self.info_json and (t_ccd := self.info_json.get("t_ccd_max")) is not None:
+            # Stored by a previous run, so the HTML can be rebuilt without telemetry.
+            logger.debug(f"Using t_ccd_max from info.json for obsid {self.obsid}")
+            return t_ccd
         if self.aacccdpt_msid is None:
             return None
-        # Get the max temperature over the observation period
-        t_ccd = np.max(self.aacccdpt_msid.vals)
+        # Get the max temperature over the observation period. Cast to float since
+        # np.max of the float32 telemetry gives a np.float32, which json cannot
+        # serialize and which write_info_json would not round.
+        t_ccd = float(np.max(self.aacccdpt_msid.vals))
         return t_ccd
 
     @functools.cached_property
@@ -599,8 +660,42 @@ class Observation(razl.observations.Observation):
         return CxoTime(self.starcat.date)
 
     @functools.cached_property
-    def starcat_summary(self):
-        return self.starcat.copy()
+    def starcat_summary(self) -> list[dict]:
+        """Star catalog rows rendered in the report table.
+
+        This is stored in info.json so that the HTML report can be regenerated without
+        recomputing the centroid residuals or re-fetching telemetry. The live starcat
+        wins when ``update_starcat_summary`` has run in this process, so a forced
+        recompute is not masked by the stored values.
+        """
+        if "dyag_median" not in self.starcat.colnames:
+            if self.info_json and (summary := self.info_json.get("starcat_summary")):
+                logger.info(
+                    f"Using starcat_summary from info.json for obsid {self.obsid}"
+                )
+                return summary
+
+        # .item() converts numpy scalars to plain Python types for JSON serialization.
+        return [
+            {col: row[col].item() for col in STARCAT_SUMMARY_COLS}
+            for row in self.starcat
+        ]
+
+    def starcheck_url(self, server: Literal["icxc", "occweb"]) -> str:
+        """Get URL for starcheck report on the specified server for this observation.
+
+        Parameters
+        ----------
+        server : str
+            "icxc" or "occweb"
+
+        Returns
+        -------
+        str
+            URL for the starcheck report.
+        """
+        load_url = parse_cm.paths.load_url_from_load_name(self.source, server=server)
+        return f"{load_url}/starcheck.html#obsid{self.obsid}"
 
     def processed(self) -> bool:
         """Check if the observation has already been fully processed.
@@ -620,6 +715,7 @@ class Observation(razl.observations.Observation):
         for name in names:
             path = getattr(self.path, name)
             if isinstance(path, Path) and not path.exists():
+                logger.debug(f"No {path}, obsid {self.obsid} not fully processed")
                 return False
 
         info = json.loads(self.path.info_json.read_text())
@@ -636,7 +732,55 @@ class Observation(razl.observations.Observation):
         # Last check requires that every OR has values of att_stats (from OBC vs GND
         # attitude deltas). For planned OR's that do not run due to SCS-107, the att_stats
         # will never be computed so these obsids get reprocessed every time.
+        if not out:
+            logger.debug(
+                f"Every file exists but info.json for obsid {self.obsid} is "
+                "incomplete, not fully processed"
+            )
         return out
+
+    def needs_centroid_resids(self) -> bool:
+        """Check if anything still to be made depends on the centroid residuals.
+
+        The residuals feed the two centroid plots and the median columns of
+        ``starcat_summary``. When those products are all present the residuals are not
+        needed, so regenerating just the HTML (e.g. ``--remove=index.html`` with a new
+        template) costs no telemetry fetches and no read of the residuals file.
+        """
+        names = [
+            "centroid_resids_pkl",
+            "centroid_resids_time_png",
+            "centroid_resids_scatter_png",
+        ]
+        for name in names:
+            if not (path := getattr(self.path, name)).exists():
+                logger.info(f"No {path}, centroid residuals needed")
+                return True
+
+        # starcat_summary medians are only in info.json if a previous run stored them.
+        if not (self.info_json and self.info_json.get("starcat_summary")):
+            logger.info("No starcat_summary in info.json, centroid residuals needed")
+            return True
+
+        logger.info("Centroid residuals products all exist, skipping")
+        return False
+
+    def needs_kalman_plot(self) -> bool:
+        """Check if the n_kalman / delta roll plot still needs to be made.
+
+        This is the same condition that ``plot_n_kalman_delta_roll`` applies itself, but
+        checking it here avoids evaluating ``att_deltas`` just to pass it in, which
+        fetches attitude telemetry and reads the ground aspect solution. The plot is
+        remade until the ground aspect solution lands, as recorded by the
+        kalman_plot_done touch file.
+        """
+        if (
+            self.path.n_kalman_delta_roll_png.exists()
+            and self.path.kalman_plot_done.exists()
+        ):
+            logger.info("Plot file and kalman_plot_done exist, skipping")
+            return False
+        return True
 
 
 def get_gnd_atts(
@@ -675,6 +819,10 @@ def get_gnd_atts(
     obsid_dir_local = obs2_dir_local / obsid_str
 
     if not remote_copy:
+        logger.info(
+            f"No local ground aspect solution for obsid {obsid} and --remote-copy "
+            "not set, no ground attitudes"
+        )
         return [], []
 
     # Get a limited copy of the aspect solution data from the remote archive. This
@@ -776,17 +924,75 @@ def get_obc_gnd_att_deltas(
     return out
 
 
-def get_observations(
+def yield_razl_observations_from_cmds(
+    cmds: kcc.CommandTable,
+) -> Generator[razl.observations.Observation, None, None]:
+    """Yield observations from a kadi commands table.
+
+    This is adapated from razl.observations.get_observations_from_cmds() but modified to
+    yield razl Observation objects one at a time instead of returning a list of
+    observations. This allows for more efficient processing and logging of each
+    observation as it is found.
+
+    Parameters
+    ----------
+    cmds : kcc.CommandTable
+        Kadi commands table.
+
+    Returns
+    -------
+    obs : Generator[razl.observations.Observation, None, None]
+        Generator of observations.
+    """
+    loads = razl.loads.Loads(cmds=cmds, opt={})
+
+    # Get observations in backstop (cmds) format.  This includes info about the maneuver
+    # to each observation, obs (NPNT) start and stop times and star catalogs (where
+    # applicable).
+    logger.info("Getting observations for cmds")
+    obss_bs = kc.get_observations(cmds=cmds)
+
+    # Get backstop star catalogs. The `id` and `mag` columns are set by matching with
+    # the AGASC field (given attitude) or fid positions (given SIM position).
+    # Failed matches are marked with an `id` and `mag` of -999. Matching tolerances are:
+    # - Fids: 40 arcsec halfwidth box (kadi.commands.conf.fid_id_match_halfwidth)
+    # - Stars: 1.5 arcsec halfwidth box (kadi.commands.conf.star_id_match_halfwidth)
+    logger.info("Getting starcats for cmds")
+    # Show a progress bar for large numbers of observations (typically a full repro)
+    starcats = kc.get_starcats(cmds=cmds, show_progress=len(obss_bs) > 1000)
+    starcats_map = {starcat.date: starcat for starcat in starcats}
+
+    # Here we collect the maneuver(s) which precede each observation along with other
+    # values to fully populate the observation. The logic is a little intricate.
+    nman_dates = cmds["date"][cmds["tlmsid"] == "AONMMODE"]
+
+    # If the commands do not include the NMAN command prior to the maneuver start of
+    # the first observation then skip that first observation.
+    if len(obss_bs) > 0 and not np.any(nman_dates < obss_bs[0]["manvr_start"]):
+        obss_bs = obss_bs[1:]
+
+    while obss_bs:
+        obs, obss_bs = razl.observations._get_next_observation(
+            obss_bs, starcats_map, loads, nman_dates
+        )
+        yield obs
+
+
+def yield_observations(
     start: CxoTimeLike,
     stop: CxoTimeLike,
     opt: argparse.Namespace | None = None,
-) -> list[Observation]:
+) -> Generator[Observation, None, None]:
     """
-    Get observations between the specified start and stop times.
+    Yield observations between the specified start and stop times.
 
     This function uses the kadi get_cmds() to retrieve commands and the `razl` module to
     convert those commands into observations. It also logs information about each
     observation found.
+
+    This includes a ``None`` at the start and end of the generator, corresponding to
+    unknown previous and next observations for the first and last observations in the
+    time range.
 
     Parameters
     ----------
@@ -799,24 +1005,19 @@ def get_observations(
 
     Returns
     -------
-    list of Observation
-        A list of Observation objects found between the specified start and stop times.
+    Generator[Observation | None, None, None]
+        Generate observation objects found between the specified start and stop times.
     """
     start = CxoTime(start)
     stop = CxoTime(stop)
 
-    # Get planned commands as if no SCS-107 events occurred. This gives the planned
-    # obsids and other observation information from commands.
-    lookback_days = (stop - start + 14 * u.day).to_value(u.day)
-    with kc.set_time_now(stop), kc.conf.set_temp("default_lookback", lookback_days):
-        cmds = kc.get_cmds(start, stop, event_filter=kc.filter_scs107_events)
+    # Get generator of razl Observation objects from commands in the time interval
+    cmds = kc.get_cmds(start, stop)
+    obss_razl = yield_razl_observations_from_cmds(cmds)
 
-    obss_razl = razl.observations.get_observations_from_cmds(
-        cmds,
-        allow_skip_first_obs=True,
-    )
+    # This is the initial previous observation, which is None
+    yield None
 
-    obss = []
     for obs_razl in obss_razl:
         # Create local Observation object from razl Observation object
         kwargs = {
@@ -824,6 +1025,10 @@ def get_observations(
             for k in razl.observations.Observation.__annotations__
         }
         obs = Observation(**kwargs)
+
+        # Obsid filtering if specified.
+        if opt.obsid and obs.obsid != opt.obsid:
+            continue
 
         # Ignore intermediate attitude observations without a star catalog
         if obs.starcat is None:
@@ -833,12 +1038,76 @@ def get_observations(
         obs.starcat = obs.starcat[np.isin(obs.starcat["type"], ["BOT", "GUI"])]
         if opt is not None:
             obs.opt.update(vars(opt))
-        obss.append(obs)
         logger.info(
             f"Found observation {obs.obsid} at {obs.obs_start} with {len(obs.manvrs)} manvrs"
         )
+        yield obs
 
-    return obss
+    # This is the final next observation, which is also None
+    yield None
+
+
+def resolve_duplicate_obs_key(obs: Observation, obs_next: Observation) -> bool:
+    """Resolve a duplicate ``(source, obsid)`` report key between adjacent observations.
+
+    The report directory and the prev/next links in info.json are both keyed on
+    ``(source, obsid)``, so two observations sharing that key overwrite each other and
+    produce a self-referential link that breaks the observation chain (see
+    ``check_continuity``). Observations here use the *scheduled* obsid, which is not
+    guaranteed unique within a load.
+
+    There are two ways adjacent observations can collide:
+
+    - Same star catalog: kadi splits a single dwell into two observations when the
+      as-run obsid changes during NPNT, e.g. an OR followed by the perigee CTI obsid
+      (e.g. 26461 -> 62625). These are one ACA observation with one maneuver, so
+      ``kalman_start`` and ``kalman_stop`` are identical for both halves and processing
+      them separately gives identical products. Merge them by extending the dwell of
+      ``obs_next``.
+
+    - Different star catalogs: genuinely different observations that collide because
+      kadi assigned them the same scheduled obsid. This is a known one-off around
+      2023:075 (obsid 25768), where an SCS-107 stopped the load obsid commands and an
+      unusually timed COAOSQID command event shifted which OBSID_SCH applied to each
+      dwell. Keep ``obs_next`` and drop ``obs``.
+
+    Either way ``obs_next`` is the observation to keep, so the caller drops ``obs`` from
+    the chain. This is safe for the already-written link in the *preceding* report: it
+    points at ``(source, obsid)``, which is by definition the key that ``obs_next`` also
+    has.
+
+    Parameters
+    ----------
+    obs : Observation
+        Current observation.
+    obs_next : Observation
+        Observation immediately following ``obs``.
+
+    Returns
+    -------
+    bool
+        True if ``obs`` was resolved away (merged into or superseded by ``obs_next``)
+        and should be dropped from the observation chain.
+    """
+    if (obs.source, obs.obsid) != (obs_next.source, obs_next.obsid):
+        return False
+
+    if obs.date_starcat == obs_next.date_starcat:
+        logger.info(
+            f"ObsID {obs.obsid} ({obs.source}) dwell split by an as-run obsid change, "
+            f"merging {obs.obs_start.date}-{obs.obs_stop.date} into "
+            f"{obs_next.obs_start.date}-{obs_next.obs_stop.date}"
+        )
+        obs_next.obs_start = obs.obs_start
+        obs_next.manvrs = obs.manvrs
+    else:
+        logger.warning(
+            f"ObsID {obs.obsid} ({obs.source}) has two observations with different "
+            f"star catalogs sharing one report key: {obs.date_starcat.date} and "
+            f"{obs_next.date_starcat.date}. Dropping the first one."
+        )
+
+    return True
 
 
 def write_redirect_html(target_dir: Path, redirect_file_path: Path):
@@ -1019,7 +1288,10 @@ def get_centroid_resids(
 
     logger.info("Computing centroid residuals from telemetry")
     crs = {}
-    cr = CentroidResiduals(start, stop)
+    # set_no_track_to_nan keeps samples where the OBC was not tracking and sets them to
+    # NaN, instead of dropping them and leaving an unmarked gap that the interpolation
+    # in write_centroid_resids would bridge with valid-looking small residuals.
+    cr = CentroidResiduals(start, stop, set_no_track_to_nan=True)
 
     # Grab attitude telemetry once for all slots, copying each time. This is basically
     # equivalent to cr.set_atts("obc"), but using quat_aoattqt is more robust.
@@ -1208,32 +1480,134 @@ def plot_n_kalman_delta_roll(
         kalman_plot_done_path.touch()
 
 
-def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None) -> None:
-    """
-    Make png plot of OBC centroid residuals in each slot.
-
-    Residuals computed using ground attitude solution for science observations
-    and OBC attitude solution for ER observations.
+def select_crs_slots(
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
+    slots: int | list[int] | None = None,
+) -> dict[int, CentroidResiduals | CentroidResidualsLite]:
+    """Select a subset of slots from a centroid residuals dict.
 
     Parameters
     ----------
     crs : dict
-        Dictionary of CentroidResiduals objects keyed by slot.
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
+    slots : int or list of int, optional
+        Slot or list of slots to select, in the order given. If None then ``crs`` is
+        returned unchanged.
+
+    Returns
+    -------
+    dict
+        New dictionary with the selected slots, in the order given by ``slots``.
+    """
+    if slots is None:
+        return crs
+
+    if isinstance(slots, numbers.Integral):
+        slots = [slots]
+
+    # Report all the missing slots at once instead of failing on the first one. Slot
+    # keys can be numpy ints, so cast for a readable message.
+    if missing := [slot for slot in slots if slot not in crs]:
+        slots_avail = sorted(int(slot) for slot in crs)
+        missing = [int(slot) for slot in missing]
+        raise ValueError(
+            f"slots {missing} not in centroid residuals with slots {slots_avail}"
+        )
+
+    return {slot: crs[slot] for slot in slots}
+
+
+def shade_no_track_intervals(
+    ax: plt.Axes,
+    cr: CentroidResiduals | CentroidResidualsLite,
+    t_ref: float,
+) -> None:
+    """Shade intervals on ``ax`` where the OBC was not tracking.
+
+    Not-tracking samples have NaN centroid residuals (see ``set_no_track_to_nan`` in
+    ``get_centroid_resids``), so they appear as gaps in the residuals trace. Shading
+    makes the dropout explicit instead of leaving an unexplained gap.
+
+    Parameters
+    ----------
+    ax : plt.Axes
+        Axes to shade.
+    cr : CentroidResiduals or CentroidResidualsLite
+        Centroid residuals for one slot.
+    t_ref : float
+        Reference time (CXC seconds) that the plot x-axis is relative to.
+    """
+    # Union of the dyag and dzag dropouts. These are the same in practice but the yag
+    # and zag samples are not required to share a time base.
+    for ax_name in ["yag", "zag"]:
+        resids = np.asarray(getattr(cr, f"d{ax_name}s"), dtype=np.float64)
+        times = getattr(cr, f"{ax_name}_times")
+        if len(times) < 2:
+            continue
+
+        no_track = np.isnan(resids)
+        if not np.any(no_track):
+            continue
+
+        intervals = logical_intervals(times, no_track, complete_intervals=False)
+        for interval in intervals:
+            ax.axvspan(
+                interval["tstart"] - t_ref,
+                interval["tstop"] - t_ref,
+                color="red",
+                alpha=0.15,
+                lw=0,
+                zorder=0,
+            )
+
+
+def plot_crs_time(
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
+    save_path: Path | None = None,
+    *,
+    slots: int | list[int] | None = None,
+) -> None:
+    """
+    Make png plot of OBC centroid residuals in each slot.
+
+    Residuals are computed with respect to the OBC attitude solution for both OR and
+    ER observations. Residuals larger than 5 arcsec are drawn in red, and samples
+    where the OBC was not tracking are NaN so they show as gaps.
+
+    Parameters
+    ----------
+    crs : dict
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
     save_path : Path, optional
         Path to save the plot if not None.
+    slots : int or list of int, optional
+        Slot or list of slots to plot, in the order given (default=all slots in
+        ``crs``).
     """
     if save_path and save_path.exists():
         logger.info("Plot file exists, skipping")
         return
 
+    crs = select_crs_slots(crs, slots)
+
     colors = {"yag": "k", "zag": "slategray"}
 
     n_slots = len(crs)
-    fig, axes = plt.subplots(nrows=n_slots, ncols=1, figsize=(8, n_slots * 7 / 8))
+    # squeeze=False so that axes is always a 1-d array, even for a single slot.
+    fig, axes = plt.subplots(
+        nrows=n_slots, ncols=1, figsize=(8, n_slots * 7 / 8), squeeze=False
+    )
+    axes = axes[:, 0]
 
     legend = False
 
     for slot, ax in zip(crs, axes, strict=True):
+        cr = crs[slot]
+        # Same reference time as the traces below, which use their own first sample.
+        t_refs = [times[0] for times in (cr.yag_times, cr.zag_times) if len(times) > 0]
+        if t_refs:
+            shade_no_track_intervals(ax, cr, min(t_refs))
+
         for coord in ["yag", "zag"]:
             resids_obc = getattr(crs[slot], f"d{coord}s")
             times_obc = getattr(crs[slot], f"{coord}_times")
@@ -1281,24 +1655,32 @@ def plot_crs_time(crs: CentroidResiduals, save_path: Path | None = None) -> None
 
 def plot_crs_scatter(
     starcat: "ACATable",
-    crs: dict[int, CentroidResiduals],
+    crs: dict[int, CentroidResiduals | CentroidResidualsLite],
     scale: float = 20,
     save_path: Path | None = None,
 ) -> None:
     """
-    Make visual plot of OBC centroid residuals.
+    Make visual plot of OBC centroid residuals on the ACA CCD.
 
-    Plot visualization of OBC centroid residuals with respect to ground (obc)
-    aspect solution for science (ER) observations in the yang/zang plain.
+    Each guide star is plotted at its catalog position with its centroid residuals
+    drawn around it, scaled up by ``scale`` to be visible, plus a ring marking 5 arcsec
+    at the same scale. Note that the plot data coordinates are CCD pixels (as set up by
+    ``chandra_aca.plot.plot_stars``) even though the axes are tick-labeled in arcsec.
+
+    Residuals are computed with respect to the OBC attitude solution for both OR and
+    ER observations. Slots without centroid residuals are skipped, and samples where
+    the OBC was not tracking are NaN so they do not plot.
 
     Parameters
     ----------
     starcat : ACATable
         Star catalog table.
     crs : dict
-        Dictionary of CentroidResiduals objects keyed by slot.
+        Dictionary of CentroidResiduals or CentroidResidualsLite objects keyed by slot.
     scale : float, optional
-        Scale factor for residuals.
+        Scale factor applied to the residuals for display, in pixels per arcsec
+        (default=20). This deliberately exaggerates the residuals, since true scale
+        on the ACA CCD is about 0.2 pixels per arcsec.
     save_path : Path, optional
         Path to save the plot if not None.
     """
@@ -1349,6 +1731,8 @@ def update_starcat_summary(
     crs: dict[int, CentroidResiduals],
 ) -> None:
     """Update starcat in place with median observed mag, dyag, dzag values."""
+    # NOTE: mag_median below is still computed over all samples including those where
+    # the OBC was not tracking, where AOACMAG reads the bad-data value.
     for name in ["dyag", "dzag", "mag"]:
         starcat[f"{name}_median"] = np.nan
 
@@ -1356,8 +1740,9 @@ def update_starcat_summary(
         slot = entry["slot"]
         if slot not in crs:
             continue
-        entry["dyag_median"] = np.median(crs[slot].dyags)
-        entry["dzag_median"] = np.median(crs[slot].dzags)
+        # nanmedian since not-tracking samples are NaN (see set_no_track_to_nan)
+        entry["dyag_median"] = np.nanmedian(crs[slot].dyags)
+        entry["dzag_median"] = np.nanmedian(crs[slot].dzags)
         mags = fetch.Msid(f"aoacmag{slot}", start, stop)
         entry["mag_median"] = np.median(mags.vals)
 
@@ -1438,6 +1823,9 @@ def write_centroid_resids(crs: dict[int, CentroidResiduals], save_path: Path) ->
                 logger.info(f"Overflow in {n_overflow} d{ax} values for slot {slot}")
             dyzs = dyzs.clip(-max16, max16)
             dyz_times = getattr(cr, attr_times)
+            # Non-tracking samples are NaN on a complete time base (see
+            # set_no_track_to_nan in get_centroid_resids), so np.interp propagates
+            # NaN across the dropout instead of bridging it with a smooth ramp.
             info_slot[attr_vals] = np.interp(times, dyz_times, dyzs).astype(np.float16)
 
         out[slot] = info_slot
@@ -1496,30 +1884,43 @@ def process_obs(obs: Observation, opt: argparse.Namespace):
             f"ObsID {obs.obsid} has no maneuver event in telemetry, skipping"
         )
 
-    # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
-    if obs.q_att_obc is None:
-        raise SkipObservation(f"ObsID {obs.obsid} has insufficient telemetry, skipping")
-
     start, stop = obs.kalman_start, obs.kalman_stop
 
-    # To allow faster reprocessing (e.g. just the HTML), try reading CRs from file
-    crs = get_centroid_resids(
-        start, stop, obs.starcat, obs.q_att_obc, obs.path.centroid_resids_pkl
-    )
-    write_centroid_resids(crs, obs.path.centroid_resids_pkl)
+    # Everything the HTML needs is in info.json, so skip this block entirely when the
+    # products that depend on the centroid residuals are already made. That makes
+    # regenerating just the HTML free of telemetry fetches and of reading the
+    # residuals file.
+    if obs.needs_centroid_resids():
+        # Check if telemetry is available, using AOATTQT as a proxy for all telemetry.
+        if obs.q_att_obc is None:
+            raise SkipObservation(
+                f"ObsID {obs.obsid} has insufficient telemetry, skipping"
+            )
 
-    plot_crs_time(crs, obs.path.centroid_resids_time_png)
-    plot_crs_scatter(obs.starcat, crs, save_path=obs.path.centroid_resids_scatter_png)
-    plot_n_kalman_delta_roll(
-        start,
-        stop,
-        obs.att_deltas,
-        obs.path.n_kalman_delta_roll_png,
-        obs.path.kalman_plot_done,
-        obs.is_ER,
-    )
+        # To allow faster reprocessing (e.g. just the plots), try reading CRs from file
+        crs = get_centroid_resids(
+            start, stop, obs.starcat, obs.q_att_obc, obs.path.centroid_resids_pkl
+        )
+        write_centroid_resids(crs, obs.path.centroid_resids_pkl)
 
-    update_starcat_summary(start, stop, obs.starcat, crs)
+        plot_crs_time(crs, obs.path.centroid_resids_time_png)
+        plot_crs_scatter(
+            obs.starcat, crs, save_path=obs.path.centroid_resids_scatter_png
+        )
+        update_starcat_summary(start, stop, obs.starcat, crs)
+
+    # Gated separately from the centroid residuals: this replots until the ground
+    # aspect solution lands. See Observation.needs_kalman_plot().
+    if obs.needs_kalman_plot():
+        plot_n_kalman_delta_roll(
+            start,
+            stop,
+            obs.att_deltas,
+            obs.path.n_kalman_delta_roll_png,
+            obs.path.kalman_plot_done,
+            obs.is_ER,
+        )
+
     write_index_html(obs, obs.path.index_html)
     write_info_json(obs, obs.path.info_json)
     make_obsid_dir_links(obs)
@@ -1545,12 +1946,26 @@ def make_obsid_dir_links(obs: Observation):
     )
 
 
+def log_run_configuration(opt: argparse.Namespace) -> None:
+    """Log the version, time, user, machine and processing args for this run.
+
+    The ``--stop`` default is the ``CxoTime.NOW`` sentinel, which has no useful repr, so
+    show it by name in a copy. The identity of ``opt.stop`` is what selects
+    ``--no-last-links`` in ``main()``, so the real opt is left alone.
+    """
+    opt_info = argparse.Namespace(**vars(opt))
+    if opt_info.stop is CxoTime.NOW:
+        opt_info.stop = "NOW"
+    log_run_info(logger.info, opt_info, version=__version__)
+
+
 def main(args=None):
     # Always non-interactive plots for command-line app
     plt.switch_backend("agg")
 
     opt = get_opt().parse_args(args)
     logger.setLevel(opt.log_level)
+    log_run_configuration(opt)
 
     # Require --no-last-links if a non-NOW stop was specified for reprocessing an
     # interval. Otherwise it is too easy to corrupt the last links accidentally.
@@ -1562,21 +1977,34 @@ def main(args=None):
     start = CxoTime(opt.start) if opt.start else stop - NDAYS_DEFAULT * u.day
     logger.info(f"Processing from {start} to {stop}")
 
-    obss = get_observations(start, stop, opt)
-    logger.info(f"Found {len(obss)} observations")
+    # 3-observation FIFO to access prev, curr, and next observations. The
+    # yield_observations() generator starts and ends with None to indicate unknown.
+    obss: collections.deque[Observation] = collections.deque(maxlen=3)
 
-    for idx, obs in enumerate(obss):
-        if opt.obsid and obs.obsid != opt.obsid:
+    for obs_next in yield_observations(start, stop, opt):
+        obss.append(obs_next)
+
+        # Wait until we have filled the deque
+        if len(obss) < 3:
+            continue
+
+        obs_prev: Observation = obss[0]
+        obs: Observation = obss[1]
+        # obs_next = obss[2]  # already set
+
+        if obs_next is not None and resolve_duplicate_obs_key(obs, obs_next):
+            # obs and obs_next share a report key, so obs was merged into obs_next or
+            # dropped. Take obs out of the FIFO so that obs_next links back to obs_prev.
+            del obss[1]
             continue
 
         logger.info("*" * 80)
         logger.info(f"Processing observation {obs.obsid}")
         logger.info("*" * 80)
 
-        obs.obs_prev = obss[idx - 1] if idx > 0 else obs.obs_link_from_info("prev")
-        obs.obs_next = (
-            obss[idx + 1] if idx < len(obss) - 1 else obs.obs_link_from_info("next")
-        )
+        obs.obs_prev = obs.obs_link_from_info("prev") if obs_prev is None else obs_prev
+        obs.obs_next = obs.obs_link_from_info("next") if obs_next is None else obs_next
+
         index_html_path = obs.path.index_html
         info_json_path = obs.path.info_json
 
