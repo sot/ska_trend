@@ -426,6 +426,7 @@ class Observation(razl.observations.Observation):
             "aber",
             "att_stats",
             "manvr_angle",
+            "momentum_unload",
             "obs_links",
             "one_shot",
             "starcat_summary",
@@ -510,6 +511,37 @@ class Observation(razl.observations.Observation):
             angle = -999.0
             logger.warning(f"Observation {self.obsid} has no maneuvers")
         return angle
+
+    @functools.cached_property
+    def momentum_unload(self) -> str | None:
+        """Date of the momentum unload (AOMUNLGR) command during the observation.
+
+        Momentum accumulates slowly and thermal restrictions limit how often a dump can
+        run, so an observation never contains more than one. A dump fires thrusters
+        during NPNT and can disturb the centroid residuals, so the report flags one when
+        it occurs. This comes from commanding, not telemetry, so it is available even
+        when the maneuver event is not.
+
+        ``self.cmds`` starts at NMAN prior to the maneuver, hence the cut at
+        ``obs_start`` to keep this to the NPNT dwell itself.
+        """
+        ok = (self.cmds["tlmsid"] == "AOMUNLGR") & (
+            self.cmds["date"] >= self.obs_start.date
+        )
+        dates = self.cmds["date"][ok]
+        return str(dates[0]) if len(dates) > 0 else None
+
+    @functools.cached_property
+    def momentum_unload_text(self) -> str | None:
+        """Report text for ``momentum_unload``, or None if there was no unload.
+
+        The date is annotated with its offset from the Kalman start so it can be matched
+        to a feature in the centroid residuals plot, whose x-axis is seconds from the
+        start of the dwell.
+        """
+        if (date := self.momentum_unload) is None:
+            return None
+        return f"{date} (kalman {(CxoTime(date) - self.kalman_start).sec:+.0f} sec)"
 
     @functools.cached_property
     def obs_links(self) -> dict[str, dict | None]:

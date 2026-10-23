@@ -316,3 +316,31 @@ def test_resolve_duplicate_obs_key_on_real_observations(
     pairs = list(itertools.pairwise(obss))
     others = [pair for i, pair in enumerate(pairs) if i != idx]
     assert not any(cent_app.resolve_duplicate_obs_key(a, b) for a, b in others)
+
+
+def test_momentum_unload_from_commanding() -> None:
+    """Only the obsid with an AOMUNLGR command in its dwell is flagged.
+
+    ``kadi.events.dumps`` has exactly one ground unload in this window, in obsid 41156
+    starting at 2026:253:18:43:57.205 in telemetry.
+    """
+    opt = argparse.Namespace(obsid=None, data_root="reports", remote_copy=False)
+    obss = cent_app.yield_observations("2026:253:12:00:00", "2026:254:00:00:00", opt)
+    unloads = {obs.obsid: obs.momentum_unload for obs in obss if obs}
+
+    assert unloads[41156] == "2026:253:18:43:56.780"
+    assert all(date is None for obsid, date in unloads.items() if obsid != 41156)
+
+
+def test_momentum_unload_text_offset_from_kalman_start() -> None:
+    """The unload is dated and annotated with its offset from the Kalman start."""
+    kalman_start = CxoTime("2026:280:01:51:11.064")
+    obs = SimpleNamespace(
+        momentum_unload="2026:280:02:10:00.000", kalman_start=kalman_start
+    )
+
+    text = cent_app.Observation.momentum_unload_text.func(obs)
+
+    assert text == "2026:280:02:10:00.000 (kalman +1129 sec)"
+    obs = SimpleNamespace(momentum_unload=None, kalman_start=kalman_start)
+    assert cent_app.Observation.momentum_unload_text.func(obs) is None

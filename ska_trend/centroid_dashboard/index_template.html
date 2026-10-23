@@ -156,6 +156,10 @@ Next Observation: {% if obs.obs_next %}
 {% else %}
 None
 {% endif %}
+{% if obs.momentum_unload_text %}
+
+Momentum unload (AOMUNLGR): {{obs.momentum_unload_text}}
+{% endif %}
 {% endif %}</pre> <!-- if not traceback-->
             </div>
         </div>
