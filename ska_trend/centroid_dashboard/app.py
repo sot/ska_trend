@@ -561,12 +561,14 @@ class Observation(razl.observations.Observation):
         ]
 
     def date_rel_kalman_text(self, date: str) -> str:
-        """Report text for ``date``, annotated with its offset from the Kalman start.
+        """Report lines for ``date``, with its offset from the Kalman start.
 
         The centroid residuals plot x-axis is seconds from the start of the dwell, so
-        the offset points at the corresponding feature in the plot.
+        the offset points at the corresponding feature in the plot. This is two indented
+        lines to keep the report column narrow.
         """
-        return f"{date} (kalman {(CxoTime(date) - self.kalman_start).sec:+.0f} sec)"
+        dt = (CxoTime(date) - self.kalman_start).sec
+        return f"  Date: {date}\n  Relative: {dt:.0f} sec"
 
     @functools.cached_property
     def momentum_unload_text(self) -> str | None:
@@ -576,9 +578,11 @@ class Observation(razl.observations.Observation):
         return self.date_rel_kalman_text(date)
 
     @functools.cached_property
-    def srdcs_text(self) -> list[str]:
-        """Report lines for ``srdcs``, one per SRDC."""
-        return [self.date_rel_kalman_text(date) for date in self.srdcs]
+    def srdcs_text(self) -> str | None:
+        """Report text for ``srdcs``, or None if there were none."""
+        if not self.srdcs:
+            return None
+        return "\n".join(self.date_rel_kalman_text(date) for date in self.srdcs)
 
     @functools.cached_property
     def obs_links(self) -> dict[str, dict | None]:

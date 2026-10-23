@@ -351,16 +351,17 @@ def test_srdcs_from_commanding() -> None:
 
 
 def test_date_rel_kalman_text() -> None:
-    """A date is annotated with its offset from the Kalman start."""
+    """A date is reported with its offset from the Kalman start, on two lines."""
     obs = SimpleNamespace(kalman_start=CxoTime("2026:280:01:51:11.064"))
 
     text = cent_app.Observation.date_rel_kalman_text(obs, "2026:280:02:10:00.000")
 
-    assert text == "2026:280:02:10:00.000 (kalman +1129 sec)"
+    assert text == "  Date: 2026:280:02:10:00.000\n  Relative: 1129 sec"
 
 
-def test_momentum_unload_text_is_none_without_unload() -> None:
-    """No unload gives None, which is what the template keys the section off."""
-    obs = SimpleNamespace(momentum_unload=None)
+def test_report_text_is_none_without_event() -> None:
+    """No unload and no SRDC give None, which the template keys the sections off."""
+    obs = SimpleNamespace(momentum_unload=None, srdcs=[])
 
     assert cent_app.Observation.momentum_unload_text.func(obs) is None
+    assert cent_app.Observation.srdcs_text.func(obs) is None
