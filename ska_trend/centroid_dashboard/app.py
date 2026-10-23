@@ -122,6 +122,11 @@ def get_opt():
     parser.add_argument(
         "--log-level", default="INFO", help="Logging level (default=INFO)"
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     return parser
 
 
