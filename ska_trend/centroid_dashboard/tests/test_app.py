@@ -332,15 +332,35 @@ def test_momentum_unload_from_commanding() -> None:
     assert all(date is None for obsid, date in unloads.items() if obsid != 41156)
 
 
-def test_momentum_unload_text_offset_from_kalman_start() -> None:
-    """The unload is dated and annotated with its offset from the Kalman start."""
-    kalman_start = CxoTime("2026:280:01:51:11.064")
-    obs = SimpleNamespace(
-        momentum_unload="2026:280:02:10:00.000", kalman_start=kalman_start
+def test_srdcs_from_commanding() -> None:
+    """SRDC detection agrees with starcheck for the same observations.
+
+    These two dates are the "Scheduled SRDC in backstop" entries that
+    ``check_for_srdcs()`` reports for OCT0526A, found the same way: a COACTSX
+    activation of SCS 142 or 143 within the dwell.
+    """
+    opt = argparse.Namespace(obsid=None, data_root="reports", remote_copy=False)
+    obss = cent_app.yield_observations("2026:280:00:00:00", "2026:280:14:00:00", opt)
+    srdcs = {obs.obsid: obs.srdcs for obs in obss if obs}
+
+    assert srdcs[41087] == ["2026:280:03:39:59.000"]
+    assert srdcs[41083] == ["2026:280:12:18:54.000"]
+    assert all(
+        dates == [] for obsid, dates in srdcs.items() if obsid not in (41083, 41087)
     )
 
-    text = cent_app.Observation.momentum_unload_text.func(obs)
+
+def test_date_rel_kalman_text() -> None:
+    """A date is annotated with its offset from the Kalman start."""
+    obs = SimpleNamespace(kalman_start=CxoTime("2026:280:01:51:11.064"))
+
+    text = cent_app.Observation.date_rel_kalman_text(obs, "2026:280:02:10:00.000")
 
     assert text == "2026:280:02:10:00.000 (kalman +1129 sec)"
-    obs = SimpleNamespace(momentum_unload=None, kalman_start=kalman_start)
+
+
+def test_momentum_unload_text_is_none_without_unload() -> None:
+    """No unload gives None, which is what the template keys the section off."""
+    obs = SimpleNamespace(momentum_unload=None)
+
     assert cent_app.Observation.momentum_unload_text.func(obs) is None

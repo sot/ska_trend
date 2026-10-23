@@ -160,6 +160,12 @@ None
 
 Momentum unload (AOMUNLGR): {{obs.momentum_unload_text}}
 {% endif %}
+{% if obs.srdcs_text %}
+
+SRDC (SCS 142/143):{% for line in obs.srdcs_text %}
+ {{line}}
+{% endfor %}
+{% endif %}
 {% endif %}</pre> <!-- if not traceback-->
             </div>
         </div>

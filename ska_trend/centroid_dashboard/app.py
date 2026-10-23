@@ -59,6 +59,10 @@ STARCAT_SUMMARY_COLS = (
     "dyag_median",
     "dzag_median",
 )
+# SCS slots that run an SRDC, activated by a COACTSX command in the load. This is the
+# same detection that starcheck check_for_srdcs() uses.
+SRDC_SCS_SLOTS = (142, 143)
+
 SKA = Path(os.environ["SKA"])
 DATA_ROOT_DEFAULT = SKA / "data" / "centroid_dashboard" / "centroid_reports"
 
@@ -429,6 +433,7 @@ class Observation(razl.observations.Observation):
             "momentum_unload",
             "obs_links",
             "one_shot",
+            "srdcs",
             "starcat_summary",
             "t_ccd_mean",
             "t_ccd_max",
@@ -532,16 +537,48 @@ class Observation(razl.observations.Observation):
         return str(dates[0]) if len(dates) > 0 else None
 
     @functools.cached_property
-    def momentum_unload_text(self) -> str | None:
-        """Report text for ``momentum_unload``, or None if there was no unload.
+    def srdcs(self) -> list[str]:
+        """Dates of the SRDC activations during the observation.
 
-        The date is annotated with its offset from the Kalman start so it can be matched
-        to a feature in the centroid residuals plot, whose x-axis is seconds from the
-        start of the dwell.
+        An SRDC runs from SCS 142 or 143, which the load activates with a COACTSX
+        command. The SCS contents are stored on-board rather than in the load, so the
+        activation is all there is to go on, and this matches what starcheck reports.
+
+        Unlike a momentum unload an observation can hold more than one: 3 of the 671
+        SRDCs since they started in 2018 fell in a multi-day ER dwell that already had
+        one, all three during the 2020 safe mode recovery.
+
+        ``self.cmds`` starts at NMAN prior to the maneuver, hence the cut at
+        ``obs_start`` to keep this to the NPNT dwell itself.
         """
+        ok = (self.cmds["tlmsid"] == "COACTSX") & (
+            self.cmds["date"] >= self.obs_start.date
+        )
+        return [
+            str(cmd["date"])
+            for cmd in self.cmds[ok]
+            if cmd["coacts1"] in SRDC_SCS_SLOTS
+        ]
+
+    def date_rel_kalman_text(self, date: str) -> str:
+        """Report text for ``date``, annotated with its offset from the Kalman start.
+
+        The centroid residuals plot x-axis is seconds from the start of the dwell, so
+        the offset points at the corresponding feature in the plot.
+        """
+        return f"{date} (kalman {(CxoTime(date) - self.kalman_start).sec:+.0f} sec)"
+
+    @functools.cached_property
+    def momentum_unload_text(self) -> str | None:
+        """Report text for ``momentum_unload``, or None if there was no unload."""
         if (date := self.momentum_unload) is None:
             return None
-        return f"{date} (kalman {(CxoTime(date) - self.kalman_start).sec:+.0f} sec)"
+        return self.date_rel_kalman_text(date)
+
+    @functools.cached_property
+    def srdcs_text(self) -> list[str]:
+        """Report lines for ``srdcs``, one per SRDC."""
+        return [self.date_rel_kalman_text(date) for date in self.srdcs]
 
     @functools.cached_property
     def obs_links(self) -> dict[str, dict | None]:
