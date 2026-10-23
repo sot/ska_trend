@@ -316,3 +316,52 @@ def test_resolve_duplicate_obs_key_on_real_observations(
     pairs = list(itertools.pairwise(obss))
     others = [pair for i, pair in enumerate(pairs) if i != idx]
     assert not any(cent_app.resolve_duplicate_obs_key(a, b) for a, b in others)
+
+
+def test_momentum_unload_from_commanding() -> None:
+    """Only the obsid with an AOMUNLGR command in its dwell is flagged.
+
+    ``kadi.events.dumps`` has exactly one ground unload in this window, in obsid 41156
+    starting at 2026:253:18:43:57.205 in telemetry.
+    """
+    opt = argparse.Namespace(obsid=None, data_root="reports", remote_copy=False)
+    obss = cent_app.yield_observations("2026:253:12:00:00", "2026:254:00:00:00", opt)
+    unloads = {obs.obsid: obs.momentum_unload for obs in obss if obs}
+
+    assert unloads[41156] == "2026:253:18:43:56.780"
+    assert all(date is None for obsid, date in unloads.items() if obsid != 41156)
+
+
+def test_srdcs_from_commanding() -> None:
+    """SRDC detection agrees with starcheck for the same observations.
+
+    These two dates are the "Scheduled SRDC in backstop" entries that
+    ``check_for_srdcs()`` reports for OCT0526A, found the same way: a COACTSX
+    activation of SCS 142 or 143 within the dwell.
+    """
+    opt = argparse.Namespace(obsid=None, data_root="reports", remote_copy=False)
+    obss = cent_app.yield_observations("2026:280:00:00:00", "2026:280:14:00:00", opt)
+    srdcs = {obs.obsid: obs.srdcs for obs in obss if obs}
+
+    assert srdcs[41087] == ["2026:280:03:39:59.000"]
+    assert srdcs[41083] == ["2026:280:12:18:54.000"]
+    assert all(
+        dates == [] for obsid, dates in srdcs.items() if obsid not in (41083, 41087)
+    )
+
+
+def test_date_rel_kalman_text() -> None:
+    """A date is reported with its offset from the Kalman start, on two lines."""
+    obs = SimpleNamespace(kalman_start=CxoTime("2026:280:01:51:11.064"))
+
+    text = cent_app.Observation.date_rel_kalman_text(obs, "2026:280:02:10:00.000")
+
+    assert text == "  Date: 2026:280:02:10:00.000\n  Relative: 1129 sec"
+
+
+def test_report_text_is_none_without_event() -> None:
+    """No unload and no SRDC give None, which the template keys the sections off."""
+    obs = SimpleNamespace(momentum_unload=None, srdcs=[])
+
+    assert cent_app.Observation.momentum_unload_text.func(obs) is None
+    assert cent_app.Observation.srdcs_text.func(obs) is None
